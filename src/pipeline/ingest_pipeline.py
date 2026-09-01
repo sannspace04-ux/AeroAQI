@@ -185,6 +185,13 @@ class IngestionPipeline:
         )
         results.append(processing_result)
 
+        # --- 7. Phase 6 — AQI forecast inference (runs if model is trained) --
+        forecast_result = self._run_forecast_inference(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        results.append(forecast_result)
+
         # --- Summary -------------------------------------------------
         total_sec = (datetime.now(timezone.utc) - run_start).total_seconds()
         self.print_summary(results, total_sec)
@@ -238,6 +245,166 @@ class IngestionPipeline:
             db_writer=self._db.write_observations,
             **kwargs,
         )
+
+    def _run_forecast_inference(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> SourceResult:
+        """
+        Phase 6: run AQI forecast inference using the pre-trained XGBoost model.
+
+        Loads the model from data/models/, builds features from the latest
+        observations, generates 72-hour forecasts for each active station,
+        computes SHAP explanations, and writes the results to the forecasts table.
+
+        Gracefully skips if:
+          - No trained model exists yet (data/models/ is empty)
+          - The observations table has insufficient data
+          - xgboost / shap packages are not installed
+
+        Returns a SourceResult so the pipeline summary table can show it.
+        """
+        log.info("[pipeline] ── Starting Phase 6 forecast inference ──")
+        t_start = time.monotonic()
+
+        try:
+            from pathlib import Path
+            from src.models.aqi_forecaster import AQIForecaster
+            from src.models.feature_builder import FeatureBuilder
+            from src.models.explainer import ForecastExplainer
+            from src.utils.config_loader import get_project_root, load_stations
+
+            model_dir = get_project_root() / "data" / "models"
+            forecaster = AQIForecaster()
+
+            if not forecaster.load(str(model_dir)):
+                log.info(
+                    "[pipeline] No trained model found — skipping forecast inference. "
+                    "Run: python scripts/train_model.py"
+                )
+                return SourceResult(
+                    source_name="forecast",
+                    status="skipped",
+                    error_message="No trained model. Run scripts/train_model.py first.",
+                )
+
+            # Load recent observations (last 72 h = enough for lag features)
+            from datetime import datetime, timedelta, timezone
+            end_dt = datetime.now(timezone.utc)
+            start_dt = end_dt - timedelta(hours=72)
+            obs_df = self._db.read_observations(start_time=start_dt, end_time=end_dt)
+
+            if obs_df.empty:
+                log.info("[pipeline] No recent observations — skipping forecast inference.")
+                return SourceResult(source_name="forecast", status="no_data")
+
+            import pandas as pd
+            obs_df["timestamp_utc"] = pd.to_datetime(
+                obs_df["timestamp_utc"], utc=True, errors="coerce"
+            )
+
+            fb = FeatureBuilder()
+            explainer = ForecastExplainer(forecaster)
+            stations = [s for s in load_stations() if s.get("active", True)]
+            generated_at = datetime.now(timezone.utc)
+
+            all_forecast_rows: list[dict] = []
+            model_version = f"xgb_{len(forecaster._models)}models"
+
+            for station in stations:
+                sid = station["station_id"]
+                station_df = obs_df[obs_df["station_id"] == sid].copy()
+                if station_df.empty:
+                    continue
+
+                X, _, feat_names = fb.build(station_df)
+                if X.empty:
+                    continue
+
+                base_ts = station_df["timestamp_utc"].max()
+                forecast_df = forecaster.predict(
+                    X,
+                    feature_names=feat_names,
+                    station_id=sid,
+                    base_timestamp=base_ts,
+                )
+                if forecast_df.empty:
+                    continue
+
+                # SHAP explanation for first 24 h
+                explanation = explainer.explain(X, target="pm25", horizon_hours=24)
+                top_feat_json = None
+                explanation_text = ""
+                inversion_detected = False
+                try:
+                    top_feat_json = __import__("json").dumps(
+                        explanation.get("top_features", [])
+                    )
+                    explanation_text = explanation.get("explanation_text", "")
+                    inversion_detected = explanation.get("inversion_detected", False)
+                except Exception:
+                    pass
+
+                for _, row in forecast_df.iterrows():
+                    all_forecast_rows.append({
+                        "generated_at": generated_at,
+                        "station_id": sid,
+                        "forecast_hour": int(row["forecast_hour"]),
+                        "target_utc": row.get("target_utc"),
+                        "pm25": row.get("pm25"),
+                        "pm10": row.get("pm10"),
+                        "o3": row.get("o3"),
+                        "no2": row.get("no2"),
+                        "aqi_computed": row.get("aqi_computed"),
+                        "aqi_category": row.get("aqi_category"),
+                        "top_features": top_feat_json,
+                        "explanation_text": explanation_text,
+                        "model_version": model_version,
+                    })
+
+            if not all_forecast_rows:
+                duration = time.monotonic() - t_start
+                return SourceResult(
+                    source_name="forecast",
+                    status="no_data",
+                    duration_sec=duration,
+                )
+
+            rows_written = self._db.write_forecasts(pd.DataFrame(all_forecast_rows))
+            duration = time.monotonic() - t_start
+
+            log.info(
+                f"[pipeline] Forecast inference complete — "
+                f"{rows_written} rows written for {len(stations)} stations."
+            )
+            return SourceResult(
+                source_name="forecast",
+                status="success",
+                rows_written=rows_written,
+                duration_sec=duration,
+            )
+
+        except ImportError as exc:
+            duration = time.monotonic() - t_start
+            msg = f"Missing dependency: {exc}"
+            log.warning(f"[pipeline] Forecast inference skipped — {msg}")
+            return SourceResult(
+                source_name="forecast",
+                status="skipped",
+                duration_sec=duration,
+                error_message=msg,
+            )
+        except Exception as exc:
+            duration = time.monotonic() - t_start
+            msg = f"{type(exc).__name__}: {exc}"
+            log.error(f"[pipeline] Forecast inference failed: {msg}", exc_info=True)
+            return SourceResult(
+                source_name="forecast",
+                status="failed",
+                duration_sec=duration,
+                error_message=msg,
+            )
 
     def _run_processing(
         self,

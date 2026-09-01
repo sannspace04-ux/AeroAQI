@@ -16,6 +16,9 @@ data/raw/
 data/processed/
 data/db/
 
+# Trained ML models (regenerate with scripts/train_model.py)
+data/models/
+
 # Logs
 logs/
 

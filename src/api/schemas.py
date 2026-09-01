@@ -364,3 +364,69 @@ def _clean(v: Any) -> Optional[float]:
     if v is None or _is_nan(v):
         return None
     return v
+
+
+# ---------------------------------------------------------------------------
+# Forecast (Phase 6)
+# ---------------------------------------------------------------------------
+
+class ForecastHour(_Base):
+    """One row in a 72-hour forecast: predictions for a single future hour."""
+    station_id:    Optional[str]   = None
+    forecast_hour: int             = Field(..., description="1–72 hours ahead")
+    target_utc:    Optional[str]   = Field(None, description="ISO 8601 UTC timestamp being forecast")
+    pm25:          Optional[float] = Field(None, description="Predicted PM2.5 (µg/m³)")
+    pm10:          Optional[float] = Field(None, description="Predicted PM10 (µg/m³)")
+    o3:            Optional[float] = Field(None, description="Predicted O₃ (µg/m³)")
+    no2:           Optional[float] = Field(None, description="Predicted NO₂ (µg/m³)")
+    aqi_computed:  Optional[float] = Field(None, description="Predicted AQI (CPCB scale)")
+    aqi_category:  Optional[str]   = Field(None, description="CPCB AQI category label")
+
+    @classmethod
+    def from_db_row(cls, row: dict) -> "ForecastHour":
+        ts = row.get("target_utc")
+        if ts is not None and hasattr(ts, "isoformat"):
+            ts = ts.isoformat()
+        return cls(
+            station_id=row.get("station_id"),
+            forecast_hour=int(row.get("forecast_hour", 0)),
+            target_utc=str(ts) if ts is not None else None,
+            pm25=_clean(row.get("pm25")),
+            pm10=_clean(row.get("pm10")),
+            o3=_clean(row.get("o3")),
+            no2=_clean(row.get("no2")),
+            aqi_computed=_clean(row.get("aqi_computed")),
+            aqi_category=row.get("aqi_category"),
+        )
+
+
+class ForecastResponse(_Base):
+    """72-hour AQI forecast for one monitoring station."""
+    station_id:    str
+    generated_at:  Optional[str]       = Field(None, description="ISO 8601 UTC time this forecast was generated")
+    model_version: Optional[str]       = None
+    model_trained: bool                = Field(False, description="False when no model has been trained yet")
+    count:         int                 = 0
+    hourly:        list[ForecastHour]  = Field(default_factory=list)
+    message:       Optional[str]       = Field(None, description="Informational message when model is not available")
+
+
+class ExplanationFeature(_Base):
+    """One feature's contribution to a forecast."""
+    rank:             int
+    name:             str   = Field(..., description="Internal feature column name")
+    label:            str   = Field(..., description="Human-readable feature label")
+    shap_value:       float = Field(..., description="Mean absolute SHAP value")
+    contribution_pct: float = Field(..., description="Percentage of total SHAP importance")
+
+
+class ForecastExplanationResponse(_Base):
+    """SHAP explanation for the most recent forecast at one station."""
+    station_id:         str
+    target:             str   = Field(..., description="Target pollutant, e.g. 'pm25'")
+    horizon_hours:      int   = Field(..., description="Number of forecast hours explained")
+    top_features:       list[ExplanationFeature] = Field(default_factory=list)
+    explanation_text:   str   = ""
+    inversion_detected: bool  = False
+    shap_available:     bool  = False
+    message:            Optional[str] = None

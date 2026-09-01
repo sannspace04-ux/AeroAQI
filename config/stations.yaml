@@ -1,0 +1,229 @@
+# =============================================================================
+# config/stations.yaml
+# =============================================================================
+# Master list of Delhi NCR air quality monitoring stations.
+#
+# Sources:
+#   - CPCB CAAQMS station list:
+#     https://airquality.cpcb.gov.in/ccr_docs/caaqms_list_NCR.pdf
+#   - OpenAQ location coordinates (cross-referenced via explore.openaq.org)
+#
+# IMPORTANT:
+#   Coordinates listed here are sourced from published CPCB documents and
+#   OpenAQ metadata.  Always cross-check against the CPCB PDF before
+#   using for precise spatial analysis.
+#
+# FIELDS:
+#   station_id    : unique internal ID used as the join key
+#   name          : official station name
+#   city          : city within Delhi NCR
+#   state         : Indian state
+#   latitude      : decimal degrees N (WGS-84)
+#   longitude     : decimal degrees E (WGS-84)
+#   openaq_id     : OpenAQ v3 location ID (verify at explore.openaq.org)
+#   agency        : operating agency (DPCC = Delhi, UPPCB = UP, HSPCB = Haryana)
+#   zone          : directional zone within NCR (used for transport analysis)
+#   active        : true if station is currently operational
+# =============================================================================
+
+stations:
+
+  # ── Delhi (operated by DPCC) ──────────────────────────────────────────────
+
+  - station_id: "DEL_ANAND_VIHAR"
+    name: "Anand Vihar"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.6469
+    longitude: 77.3152
+    openaq_id: 8118
+    agency: "DPCC"
+    zone: "east"
+    active: true
+
+  - station_id: "DEL_ITO"
+    name: "ITO"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.6289
+    longitude: 77.2412
+    openaq_id: 8119
+    agency: "DPCC"
+    zone: "central"
+    active: true
+
+  - station_id: "DEL_PUNJABI_BAGH"
+    name: "Punjabi Bagh"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.6714
+    longitude: 77.1312
+    openaq_id: 8120
+    agency: "DPCC"
+    zone: "west"
+    active: true
+
+  - station_id: "DEL_DWARKA_S8"
+    name: "Dwarka Sector-8"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.5733
+    longitude: 77.0696
+    openaq_id: 8121
+    agency: "DPCC"
+    zone: "southwest"
+    active: true
+
+  - station_id: "DEL_RK_PURAM"
+    name: "R.K. Puram"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.5638
+    longitude: 77.1787
+    openaq_id: 8122
+    agency: "DPCC"
+    zone: "south"
+    active: true
+
+  - station_id: "DEL_ROHINI"
+    name: "Rohini"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.7495
+    longitude: 77.0748
+    openaq_id: 8123
+    agency: "DPCC"
+    zone: "north"
+    active: true
+
+  - station_id: "DEL_MUNDKA"
+    name: "Mundka"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.6835
+    longitude: 77.0454
+    openaq_id: 8124
+    agency: "DPCC"
+    zone: "west"
+    active: true
+
+  - station_id: "DEL_OKHLA_PH2"
+    name: "Okhla Phase-2"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.5355
+    longitude: 77.2720
+    openaq_id: 8125
+    agency: "DPCC"
+    zone: "southeast"
+    active: true
+
+  - station_id: "DEL_NEHRU_NAGAR"
+    name: "Nehru Nagar"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.5700
+    longitude: 77.2500
+    openaq_id: 8126
+    agency: "DPCC"
+    zone: "central"
+    active: true
+
+  - station_id: "DEL_DTU"
+    name: "DTU (Delhi Technological University)"
+    city: "Delhi"
+    state: "Delhi"
+    latitude: 28.7497
+    longitude: 77.1163
+    openaq_id: 8127
+    agency: "DPCC"
+    zone: "northwest"
+    active: true
+
+  # ── Noida, Uttar Pradesh (operated by UPPCB) ──────────────────────────────
+
+  - station_id: "NOI_SECTOR62"
+    name: "Sector-62, Noida"
+    city: "Noida"
+    state: "Uttar Pradesh"
+    latitude: 28.6275
+    longitude: 77.3644
+    openaq_id: 8193
+    agency: "UPPCB"
+    zone: "east"
+    active: true
+
+  - station_id: "NOI_SECTOR1"
+    name: "Sector-1, Noida"
+    city: "Noida"
+    state: "Uttar Pradesh"
+    latitude: 28.5834
+    longitude: 77.3119
+    openaq_id: 8194
+    agency: "UPPCB"
+    zone: "east"
+    active: true
+
+  # ── Gurugram, Haryana (operated by HSPCB) ────────────────────────────────
+
+  - station_id: "GGN_VIKAS_SADAN"
+    name: "Vikas Sadan, Gurugram"
+    city: "Gurugram"
+    state: "Haryana"
+    latitude: 28.4516
+    longitude: 77.0311
+    openaq_id: 8200
+    agency: "HSPCB"
+    zone: "south"
+    active: true
+
+  # ── Faridabad, Haryana (operated by HSPCB) ───────────────────────────────
+
+  - station_id: "FBD_SECTOR16A"
+    name: "Sector-16A, Faridabad"
+    city: "Faridabad"
+    state: "Haryana"
+    latitude: 28.4089
+    longitude: 77.3178
+    openaq_id: 8201
+    agency: "HSPCB"
+    zone: "south"
+    active: true
+
+  # ── Ghaziabad, Uttar Pradesh (operated by UPPCB) ─────────────────────────
+
+  - station_id: "GZB_VASUNDHARA"
+    name: "Vasundhara, Ghaziabad"
+    city: "Ghaziabad"
+    state: "Uttar Pradesh"
+    latitude: 28.6692
+    longitude: 77.3740
+    openaq_id: 8202
+    agency: "UPPCB"
+    zone: "east"
+    active: true
+
+
+# =============================================================================
+# Delhi NCR bounding box — used to filter gridded data (ERA5, Open-Meteo)
+# =============================================================================
+ncr_bounds:
+  lat_min: 28.2
+  lat_max: 29.0
+  lon_min: 76.8
+  lon_max: 77.6
+
+# =============================================================================
+# Fire source region bounding box
+# Covers Punjab, Haryana, parts of UP and Rajasthan — the primary
+# stubble-burning zones that transport smoke toward Delhi NCR.
+# =============================================================================
+fire_source_region:
+  lat_min: 27.5
+  lat_max: 33.0
+  lon_min: 73.0
+  lon_max: 80.0
+  # Radius thresholds (km) for aggregating fire counts to each station
+  radius_km:
+    - 300
+    - 500

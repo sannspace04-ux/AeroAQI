@@ -1,0 +1,47 @@
+# =============================================================================
+# config/settings.yaml
+# =============================================================================
+# General project-level settings.
+# Values here are non-secret defaults; secrets always come from .env.
+# =============================================================================
+
+project:
+  name: "AeroAQI"
+  version: "0.1.0"
+  description: "Weather-chemistry coupled AQI forecasting for Delhi NCR"
+
+# Paths are relative to the project root directory
+paths:
+  raw_data_dir:       "data/raw"
+  processed_data_dir: "data/processed"
+  db_dir:             "data/db"
+  logs_dir:           "logs"
+
+# Logging
+logging:
+  # Override with LOG_LEVEL env var
+  default_level: "INFO"
+  # Log file name inside logs_dir
+  log_file: "aeroaqi.log"
+  # Maximum size before rotation (bytes)
+  max_bytes: 10485760   # 10 MB
+  backup_count: 5
+
+# Data quality thresholds
+# These are used by the validator to reject or flag suspicious values.
+# See src/schema/master_schema.py for per-column min/max bounds.
+quality:
+  # Minimum fraction of non-null values required per column
+  # (columns below this fraction trigger a WARNING, not an ERROR)
+  min_completeness: 0.5
+  # Maximum allowed fraction of duplicate rows before raising an error
+  max_duplicate_fraction: 0.05
+  # Timezone for all stored timestamps
+  timezone: "UTC"
+
+# Parquet file settings
+parquet:
+  # Compression used when writing processed Parquet files
+  compression: "snappy"
+  # Row group size hint
+  row_group_size: 100000

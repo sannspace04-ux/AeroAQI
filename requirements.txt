@@ -1,0 +1,44 @@
+# ============================================================
+# AeroAQI - Data Ingestion Dependencies
+# Pin exact versions for reproducibility
+# ============================================================
+
+# --- HTTP & API clients ---
+requests==2.31.0
+httpx==0.27.0
+
+# --- Data handling ---
+pandas==2.2.2
+numpy==1.26.4
+pyarrow==16.1.0        # Parquet read/write via pandas
+
+# --- Configuration ---
+python-dotenv==1.0.1
+PyYAML==6.0.1
+
+# --- Geospatial ---
+geopandas==0.14.4
+shapely==2.0.4
+
+# --- Atmospheric / scientific ---
+scipy==1.13.1
+
+# --- ERA5 / Copernicus CDS ---
+cdsapi==0.7.2
+
+# --- Database ---
+SQLAlchemy==2.0.30
+
+# --- Date/time ---
+python-dateutil==2.9.0
+
+# --- Validation ---
+pydantic==2.7.4
+
+# --- Testing ---
+pytest==8.2.2
+pytest-mock==3.14.0
+responses==0.25.3       # Mock HTTP calls in tests
+
+# --- Logging (stdlib is used; rich adds colour in terminal) ---
+rich==13.7.1

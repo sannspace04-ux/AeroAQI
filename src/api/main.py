@@ -103,7 +103,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="AeroAQI",
         description=_DESCRIPTION,
-        version="0.5.0",
+        version="0.6.0",
         openapi_tags=_TAGS,
         docs_url="/docs",
         redoc_url="/redoc",
@@ -120,9 +120,11 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=True,
+        allow_credentials=False,           # False required when allow_headers is explicit
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
+        allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+        expose_headers=["Content-Type", "X-Total-Count"],
+        max_age=600,                        # cache preflight for 10 min
     )
 
     # ── Global exception handler ──────────────────────────────────────────

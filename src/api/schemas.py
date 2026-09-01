@@ -329,6 +329,24 @@ class PipelineSourceResult(BaseModel):
     error_message: Optional[str] = None
 
 
+class PipelineRunRecord(BaseModel):
+    """One row from the ingestion_runs audit table."""
+    id: Optional[int] = None
+    run_timestamp: Optional[str] = Field(None, description="ISO 8601 UTC timestamp")
+    source_name: Optional[str] = None
+    mode: Optional[str] = Field(None, description="realtime | historical | static")
+    status: Optional[str] = Field(None, description="success | failed | skipped | no_data")
+    rows_written: int = 0
+    duration_sec: Optional[float] = None
+    error_message: Optional[str] = None
+
+
+class PipelineRunsResponse(BaseModel):
+    """Response for GET /pipeline/runs."""
+    count: int
+    runs: list[PipelineRunRecord]
+
+
 class PipelineRunResponse(BaseModel):
     run_id: str = Field(..., description="Unique run identifier (timestamp-based)")
     mode: str

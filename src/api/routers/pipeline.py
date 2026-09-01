@@ -30,7 +30,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from src.api.dependencies import DbDep
 from src.api.schemas import (
-    PipelineRunRequest, PipelineRunResponse, PipelineSourceResult,
+    PipelineRunRequest, PipelineRunResponse, PipelineRunRecord,
+    PipelineRunsResponse, PipelineSourceResult,
 )
 from src.utils.logger import get_logger
 
@@ -100,36 +101,38 @@ def trigger_pipeline(
 
 @router.get(
     "/runs",
+    response_model=PipelineRunsResponse,
     summary="Recent pipeline run history",
     description=(
         "Returns the N most recent ingestion run audit records from the database. "
-        "Each record shows the source, mode, status, rows written, and duration."
+        "Each record shows the source, mode, status, rows written, and duration. "
+        "Default n=20, max n=200."
     ),
 )
-def list_runs(db: DbDep, n: int = 20) -> dict:
+def list_runs(db: DbDep, n: int = 20) -> PipelineRunsResponse:
     """Return the last N pipeline run records from the audit table."""
     if n < 1 or n > 200:
         raise HTTPException(status_code=422, detail="n must be between 1 and 200.")
     df = db.read_recent_ingestion_runs(n=n)
     if df.empty:
-        return {"count": 0, "runs": []}
+        return PipelineRunsResponse(count=0, runs=[])
 
     runs = []
     for row in df.to_dict(orient="records"):
         ts = row.get("run_timestamp")
         if ts is not None and hasattr(ts, "isoformat"):
             ts = ts.isoformat()
-        runs.append({
-            "id": row.get("id"),
-            "run_timestamp": str(ts) if ts else None,
-            "source_name": row.get("source_name"),
-            "mode": row.get("mode"),
-            "status": row.get("status"),
-            "rows_written": row.get("rows_written", 0),
-            "duration_sec": row.get("duration_sec"),
-            "error_message": row.get("error_message"),
-        })
-    return {"count": len(runs), "runs": runs}
+        runs.append(PipelineRunRecord(
+            id=row.get("id"),
+            run_timestamp=str(ts) if ts else None,
+            source_name=row.get("source_name"),
+            mode=row.get("mode"),
+            status=row.get("status"),
+            rows_written=int(row.get("rows_written", 0) or 0),
+            duration_sec=row.get("duration_sec"),
+            error_message=row.get("error_message"),
+        ))
+    return PipelineRunsResponse(count=len(runs), runs=runs)
 
 
 # ---------------------------------------------------------------------------

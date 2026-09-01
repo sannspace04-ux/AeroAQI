@@ -22,7 +22,7 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 router = APIRouter(prefix="/health", tags=["Health"])
 
-_VERSION = "0.5.0"  # Phase 5 — backend API
+_VERSION = "0.6.0"  # Phase 6 — XGBoost forecasting + SHAP explainability
 
 
 @router.get(

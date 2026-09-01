@@ -33,10 +33,11 @@ Source-to-column mapping
                      fire_count_500km, total_frp_300km in the pipeline)
     GADM            Static geographic reference — not added to this table.
     ----------      -----------------------------------------------
-    DERIVED later:  inversion_flag, inversion_strength, wind_transport_idx,
-                    mixing_volume_idx, aqi_computed
-    DEFERRED:       fire_count_300km, fire_count_500km, total_frp_300km
-                    (spatial join not yet implemented)
+    DERIVED later:  inversion_flag, inversion_strength, temperature_profile,
+                    wind_transport_idx, mixing_volume_idx, aqi_computed,
+                    fire_count_300km, fire_count_500km, total_frp_300km,
+                    fire_distance_km, fire_nearest_frp, fire_transport_risk
+                    (computed by src/processing/ modules in Phase 4)
 """
 
 from __future__ import annotations
@@ -147,33 +148,51 @@ MASTER_SCHEMA: list[ColumnSpec] = [
                valid_min=-40.0, valid_max=35.0,
                description="Air temperature at 700 hPa pressure level (~3000 m)"),
 
-    # ── Fire — aggregated from FIRMS (DEFERRED: spatial join not yet done) ─
-    ColumnSpec("fire_count_300km","Float64", "count",  "firms",     "DEFERRED", nullable=True,
+    # ── Fire — aggregated from FIRMS (Phase 4: populated by fire_aggregator) ─
+    ColumnSpec("fire_count_300km",   "Float64", "count",  "firms",     "DERIVED", nullable=True,
                valid_min=0.0,
                description="Number of active fire detections within 300 km of station "
-                            "[populated by pipeline spatial join, not directly by fetcher]"),
-    ColumnSpec("fire_count_500km","Float64", "count",  "firms",     "DEFERRED", nullable=True,
+                            "(populated by fire_aggregator.py spatial join)"),
+    ColumnSpec("fire_count_500km",   "Float64", "count",  "firms",     "DERIVED", nullable=True,
                valid_min=0.0,
                description="Number of active fire detections within 500 km of station"),
-    ColumnSpec("total_frp_300km", "Float64", "MW",     "firms",     "DEFERRED", nullable=True,
+    ColumnSpec("total_frp_300km",    "Float64", "MW",     "firms",     "DERIVED", nullable=True,
                valid_min=0.0,
                description="Total Fire Radiative Power within 300 km of station (MW)"),
+    ColumnSpec("fire_distance_km",   "Float64", "km",     "firms",     "DERIVED", nullable=True,
+               valid_min=0.0, valid_max=3000.0,
+               description="Great-circle distance (km) to the nearest active fire detection"),
+    ColumnSpec("fire_nearest_frp",   "Float64", "MW",     "firms",     "DERIVED", nullable=True,
+               valid_min=0.0,
+               description="Fire Radiative Power (MW) of the nearest active fire detection"),
+    ColumnSpec("fire_transport_risk","Float64", "",       "firms",     "DERIVED", nullable=True,
+               valid_min=0.0, valid_max=1.0,
+               description="Normalised [0-1] composite risk: combines fire proximity, "
+                            "total FRP within 500 km, and NW wind alignment. "
+                            "Higher = higher risk of smoke transport to station."),
 
-    # ── Derived features (computed in feature engineering, Phase 4) ────────
+    # ── Derived atmospheric features (Phase 4: computed by feature_engineer) ─
     ColumnSpec("inversion_flag",       "boolean",  "",    "derived", "DERIVED", nullable=True,
-               description="True when temp_850hpa > temp at surface + threshold "
+               description="True when temp_850hpa > surface temperature + 2 °C "
                             "(indicates temperature inversion trapping pollution)"),
     ColumnSpec("inversion_strength",   "Float64",  "°C", "derived", "DERIVED", nullable=True,
-               description="temp_850hpa − temperature (positive = inversion present)"),
+               description="temp_850hpa − temperature; positive = inversion present. "
+                            "Larger values mean a stronger lid on the boundary layer."),
+    ColumnSpec("temperature_profile",  "string",   "",   "derived", "DERIVED", nullable=True,
+               description="JSON-serialised dict of {pressure_hPa: temp_C} for the "
+                            "available levels (925, 850, 700 hPa). Useful for "
+                            "visualising the vertical temperature structure."),
     ColumnSpec("wind_transport_idx",   "Float64",  "",   "derived", "DERIVED", nullable=True,
-               description="Composite score: fire FRP × NW wind alignment "
-                            "(high = smoke likely transported toward Delhi)"),
-    ColumnSpec("mixing_volume_idx",    "Float64",  "",   "derived", "DERIVED", nullable=True,
-               description="pbl_height × wind_speed — proxy for atmospheric ventilation"),
+               description="Directional alignment score [0-1]: how much the current "
+                            "wind direction points FROM the Punjab/Haryana source region "
+                            "TOWARD the station. 1 = perfect NW flow, 0 = opposing flow."),
+    ColumnSpec("mixing_volume_idx",    "Float64",  "m²/s", "derived", "DERIVED", nullable=True,
+               description="pbl_height × wind_speed — proxy for atmospheric ventilation "
+                            "capacity. Higher values = better dispersion of pollutants."),
     ColumnSpec("aqi_computed",         "Float64",  "",   "derived", "DERIVED", nullable=True,
                valid_min=0.0, valid_max=500.0,
-               description="AQI computed from CPCB formula using pm25 and pm10 "
-                            "(replaces aqi_raw when aqi_raw is absent)"),
+               description="AQI re-computed from the CPCB sub-index formula using "
+                            "pm25 and pm10 when aqi_raw is absent or suspect."),
 ]
 
 

@@ -53,6 +53,8 @@ from src.ingestion.gadm_fetcher import GADMFetcher
 from src.ingestion.openaq_fetcher import OpenAQFetcher
 from src.ingestion.openmeteo_fetcher import OpenMeteoFetcher
 from src.ingestion.era5_fetcher import ERA5Fetcher
+from src.processing.dataset_builder import DatasetBuilder
+from src.processing.quality_report import QualityReport
 from src.storage.db_client import DBClient
 from src.utils.logger import get_logger
 
@@ -78,7 +80,8 @@ class SourceResult:
 
 class IngestionPipeline:
     """
-    Orchestrates a full ingestion run across all enabled data sources.
+    Orchestrates a full ingestion run across all enabled data sources,
+    followed by Phase 4 processing (fire aggregation + feature engineering).
 
     Parameters
     ----------
@@ -87,8 +90,10 @@ class IngestionPipeline:
         in .env, falling back to SQLite at data/db/aeroaqi.db.
     skip_sources : list[str] | None
         Source names to skip even if enabled in config.
-        Useful for debugging a single source: skip all others.
         e.g. skip_sources=["era5", "gadm"]
+    skip_processing : bool
+        If True, skip the Phase 4 processing step (useful when you only
+        want to ingest raw data without computing derived features).
 
     Example
     -------
@@ -101,9 +106,11 @@ class IngestionPipeline:
         self,
         db_url: Optional[str] = None,
         skip_sources: Optional[list[str]] = None,
+        skip_processing: bool = False,
     ) -> None:
         self._db = DBClient(db_url=db_url)
         self._skip_sources: set[str] = set(skip_sources or [])
+        self._skip_processing = skip_processing
         log.info("[pipeline] IngestionPipeline initialised.")
 
     # ------------------------------------------------------------------
@@ -170,6 +177,14 @@ class IngestionPipeline:
                 error_message="ERA5 not run in realtime mode.",
             ))
 
+        # --- 6. Phase 4 processing (fire aggregation + feature engineering) ---
+        processing_result = self._run_processing(
+            mode=mode,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        results.append(processing_result)
+
         # --- Summary -------------------------------------------------
         total_sec = (datetime.now(timezone.utc) - run_start).total_seconds()
         self.print_summary(results, total_sec)
@@ -223,6 +238,72 @@ class IngestionPipeline:
             db_writer=self._db.write_observations,
             **kwargs,
         )
+
+    def _run_processing(
+        self,
+        mode: str = "realtime",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> SourceResult:
+        """
+        Phase 4: fire spatial aggregation + feature engineering + master
+        dataset build.
+
+        Runs after all ingestion sources so all raw data is in the DB.
+        Returns a SourceResult with source_name="processing".
+        """
+        if self._skip_processing:
+            log.info("[pipeline] Processing step skipped (skip_processing=True).")
+            return SourceResult(source_name="processing", status="skipped")
+
+        log.info("[pipeline] ── Starting Phase 4 processing ──")
+        t_start = time.monotonic()
+
+        try:
+            builder = DatasetBuilder(self._db)
+            master_df = builder.build(
+                start_date=start_date,
+                end_date=end_date,
+                write_db=True,
+                write_parquet=True,
+            )
+            duration = time.monotonic() - t_start
+
+            if master_df.empty:
+                log.warning(
+                    "[pipeline] Processing returned an empty master dataset. "
+                    "This is normal when no observations are in the DB yet."
+                )
+                return SourceResult(
+                    source_name="processing",
+                    status="no_data",
+                    duration_sec=duration,
+                )
+
+            # Print quality report
+            report = QualityReport(master_df, source_name="master_dataset")
+            report.print_report()
+
+            return SourceResult(
+                source_name="processing",
+                status="success",
+                rows_written=len(master_df),
+                duration_sec=duration,
+            )
+
+        except Exception as exc:
+            duration = time.monotonic() - t_start
+            msg = f"{type(exc).__name__}: {exc}"
+            log.error(
+                f"[pipeline] Processing step failed: {msg}",
+                exc_info=True,
+            )
+            return SourceResult(
+                source_name="processing",
+                status="failed",
+                duration_sec=duration,
+                error_message=msg,
+            )
 
     # ------------------------------------------------------------------
     # Generic source runner

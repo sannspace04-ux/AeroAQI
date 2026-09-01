@@ -40,7 +40,7 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Integer,
-    String, Text, create_engine, text,
+    String, Text, create_engine, text, inspect as sa_inspect,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -100,17 +100,21 @@ class Observation(Base):
     temp_850hpa     = Column(Float)   # °C
     temp_700hpa     = Column(Float)   # °C
 
-    # Fire aggregates (populated later by spatial join)
-    fire_count_300km  = Column(Float)
-    fire_count_500km  = Column(Float)
-    total_frp_300km   = Column(Float)
+    # Fire aggregates (populated by fire_aggregator.py spatial join — Phase 4)
+    fire_count_300km    = Column(Float)
+    fire_count_500km    = Column(Float)
+    total_frp_300km     = Column(Float)
+    fire_distance_km    = Column(Float)   # km to nearest active fire
+    fire_nearest_frp    = Column(Float)   # FRP of nearest fire (MW)
+    fire_transport_risk = Column(Float)   # normalised [0-1] composite risk score
 
-    # Derived features (populated later by feature engineering)
-    inversion_flag      = Column(Boolean)
-    inversion_strength  = Column(Float)
-    wind_transport_idx  = Column(Float)
-    mixing_volume_idx   = Column(Float)
-    aqi_computed        = Column(Float)
+    # Derived atmospheric features (populated by feature_engineer.py — Phase 4)
+    inversion_flag        = Column(Boolean)
+    inversion_strength    = Column(Float)
+    temperature_profile   = Column(Text)    # JSON: {pressure_hPa: temp_C}
+    wind_transport_idx    = Column(Float)
+    mixing_volume_idx     = Column(Float)
+    aqi_computed          = Column(Float)
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +197,10 @@ class DBClient:
         )
         self._Session = sessionmaker(bind=self._engine)
 
-        # Create tables if they don't exist
+        # Create tables if they don't exist, then migrate any new columns
         Base.metadata.create_all(self._engine)
-        log.debug("[db] Tables verified / created.")
+        self.migrate_schema()
+        log.debug("[db] Tables verified / migrated.")
 
     # ------------------------------------------------------------------
     # Write helpers
@@ -401,6 +406,120 @@ class DBClient:
         with self._engine.connect() as conn:
             result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
             return result.scalar() or 0
+
+    def migrate_schema(self) -> list[str]:
+        """
+        Add any columns that exist in the Observation ORM model but are
+        missing from the live database table.
+
+        This is a lightweight forward-only migration: it only adds columns,
+        never drops or renames them.  Safe to call multiple times (idempotent).
+
+        Needed when a new code version adds columns to the ORM model but
+        the SQLite file was created by an older version.
+
+        Returns
+        -------
+        list[str]  — names of columns that were added.
+        """
+        inspector = sa_inspect(self._engine)
+        existing_cols = {
+            col["name"] for col in inspector.get_columns("observations")
+        }
+
+        added: list[str] = []
+        with self._engine.begin() as conn:
+            for col_attr in Observation.__table__.columns:
+                col_name = col_attr.name
+                if col_name in existing_cols:
+                    continue
+                # Determine SQLite type string
+                col_type = col_attr.type.compile(
+                    dialect=self._engine.dialect
+                )
+                sql = f"ALTER TABLE observations ADD COLUMN {col_name} {col_type}"
+                conn.execute(text(sql))
+                added.append(col_name)
+                log.info(f"[db] migrate_schema: added column '{col_name}' ({col_type})")
+
+        if added:
+            log.info(f"[db] migrate_schema: {len(added)} column(s) added: {added}")
+        else:
+            log.debug("[db] migrate_schema: schema is already up to date.")
+        return added
+
+    def write_master_dataset(self, df: pd.DataFrame) -> int:
+        """
+        Persist master dataset rows — same as write_observations but
+        explicitly named for clarity when called from the processing pipeline.
+
+        The master dataset is the merged, feature-engineered output that
+        includes derived columns (inversion_strength, fire_transport_risk, etc.).
+
+        Parameters
+        ----------
+        df : pd.DataFrame matching or subset-matching the master schema.
+
+        Returns
+        -------
+        int — number of new rows inserted.
+        """
+        return self.write_observations(df)
+
+    def read_fire_detections(
+        self,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        lat_min: Optional[float] = None,
+        lat_max: Optional[float] = None,
+        lon_min: Optional[float] = None,
+        lon_max: Optional[float] = None,
+    ) -> pd.DataFrame:
+        """
+        Read raw FIRMS fire detection records from the database.
+
+        Parameters
+        ----------
+        start_time : UTC datetime lower bound (optional).
+        end_time   : UTC datetime upper bound (optional).
+        lat_min / lat_max / lon_min / lon_max :
+            Bounding box filter (optional).  Default covers the full
+            Punjab–Haryana–Delhi NCR source region.
+
+        Returns
+        -------
+        pd.DataFrame with columns: timestamp_utc, latitude, longitude,
+            frp, confidence, satellite, bright_ti4, daynight, data_source
+        """
+        query = "SELECT * FROM fire_detections WHERE 1=1"
+        params: dict = {}
+
+        if start_time:
+            query += " AND timestamp_utc >= :start_time"
+            params["start_time"] = start_time.strftime("%Y-%m-%d %H:%M:%S")
+        if end_time:
+            query += " AND timestamp_utc <= :end_time"
+            params["end_time"] = end_time.strftime("%Y-%m-%d %H:%M:%S")
+        if lat_min is not None:
+            query += " AND latitude >= :lat_min"
+            params["lat_min"] = lat_min
+        if lat_max is not None:
+            query += " AND latitude <= :lat_max"
+            params["lat_max"] = lat_max
+        if lon_min is not None:
+            query += " AND longitude >= :lon_min"
+            params["lon_min"] = lon_min
+        if lon_max is not None:
+            query += " AND longitude <= :lon_max"
+            params["lon_max"] = lon_max
+
+        query += " ORDER BY timestamp_utc ASC"
+
+        with self._engine.connect() as conn:
+            df = pd.read_sql(text(query), conn, params=params)
+
+        log.debug(f"[db] read_fire_detections: {len(df)} rows returned.")
+        return df
 
     def get_engine(self):
         """Return the underlying SQLAlchemy engine (for advanced use)."""

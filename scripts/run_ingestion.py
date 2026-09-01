@@ -97,6 +97,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--skip-processing",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip Phase 4 processing (fire aggregation + feature engineering). "
+            "Useful when you only want to run ingestion without building the "
+            "master dataset."
+        ),
+    )
+    parser.add_argument(
         "--schema",
         action="store_true",
         help="Print the master data schema and exit (no data fetching).",
@@ -153,6 +163,7 @@ def main() -> int:
     pipeline = IngestionPipeline(
         db_url=args.db_url,
         skip_sources=args.skip or [],
+        skip_processing=args.skip_processing,
     )
 
     results = pipeline.run(

@@ -75,6 +75,16 @@ def fire_detections(
     ),
     limit: int = Query(500, ge=1, le=_MAX_LIMIT),
 ) -> FireDetectionsResponse:
+    # Validate min_confidence BEFORE hitting the DB so we always return
+    # HTTP 422 for an invalid value regardless of whether the time window
+    # contains any data.
+    _CONF_ORDER = {"low": 0, "nominal": 1, "high": 2}
+    if min_confidence is not None and min_confidence.lower() not in _CONF_ORDER:
+        raise HTTPException(
+            status_code=422,
+            detail="min_confidence must be 'low', 'nominal', or 'high'.",
+        )
+
     start_dt, end_dt = _resolve_time_range(start_time, end_time, hours or _DEFAULT_HOURS)
 
     df = db.read_fire_detections(start_time=start_dt, end_time=end_dt)
@@ -87,15 +97,9 @@ def fire_detections(
             detections=[],
         )
 
-    # Optional confidence filter
+    # Apply optional confidence filter
     if min_confidence:
-        _CONF_ORDER = {"low": 0, "nominal": 1, "high": 2}
-        min_val = _CONF_ORDER.get(min_confidence.lower())
-        if min_val is None:
-            raise HTTPException(
-                status_code=422,
-                detail="min_confidence must be 'low', 'nominal', or 'high'.",
-            )
+        min_val = _CONF_ORDER[min_confidence.lower()]
         if "confidence" in df.columns:
             # Handle both string ('nominal') and numeric (50-100) confidence
             sample = str(df["confidence"].dropna().iloc[0]) if not df["confidence"].dropna().empty else ""

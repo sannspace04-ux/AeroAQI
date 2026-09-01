@@ -581,6 +581,13 @@ class DBClient:
                 for k, v in rec.items()
                 if hasattr(Forecast, k)
             }
+            # SQLite DateTime columns require Python datetime objects — convert
+            # ISO strings if they were accidentally passed as strings.
+            for dt_col in ("generated_at", "target_utc"):
+                val = clean.get(dt_col)
+                if isinstance(val, str):
+                    from dateutil.parser import parse as _parse_dt
+                    clean[dt_col] = _parse_dt(val)
             objs.append(Forecast(**clean))
 
         with self._Session() as session:

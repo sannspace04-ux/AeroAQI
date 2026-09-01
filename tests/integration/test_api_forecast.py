@@ -58,7 +58,7 @@ def _make_forecast_rows(
             "generated_at": generated_at,
             "station_id": station_id,
             "forecast_hour": h,
-            "target_utc": (generated_at + timedelta(hours=h)).isoformat(),
+            "target_utc": generated_at + timedelta(hours=h),
             "pm25": 80.0 + h * 0.5,
             "pm10": 120.0 + h * 0.3,
             "o3": 45.0,

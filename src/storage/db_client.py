@@ -156,6 +156,30 @@ class IngestionRun(Base):
 
 
 # ---------------------------------------------------------------------------
+# Table: forecasts  (Phase 6)
+# One row = one hour of forecast for one station.
+# ---------------------------------------------------------------------------
+
+class Forecast(Base):
+    __tablename__ = "forecasts"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    generated_at    = Column(DateTime(timezone=True), nullable=False, index=True)
+    station_id      = Column(String(64), nullable=False, index=True)
+    forecast_hour   = Column(Integer, nullable=False)   # 1 … 72
+    target_utc      = Column(DateTime(timezone=True))   # timestamp being forecast
+    pm25            = Column(Float)
+    pm10            = Column(Float)
+    o3              = Column(Float)
+    no2             = Column(Float)
+    aqi_computed    = Column(Float)
+    aqi_category    = Column(String(32))                # Good/Moderate/…/Severe
+    top_features    = Column(Text)                      # JSON: list of {name,pct}
+    explanation_text = Column(Text)
+    model_version   = Column(String(64))
+
+
+# ---------------------------------------------------------------------------
 # DBClient
 # ---------------------------------------------------------------------------
 
@@ -524,3 +548,85 @@ class DBClient:
     def get_engine(self):
         """Return the underlying SQLAlchemy engine (for advanced use)."""
         return self._engine
+
+    # ------------------------------------------------------------------
+    # Phase 6 — forecast read/write
+    # ------------------------------------------------------------------
+
+    def write_forecasts(self, df: pd.DataFrame) -> int:
+        """
+        Persist forecast rows into the forecasts table.
+
+        One call per inference run; replaces any existing forecasts for the
+        same station_id + generated_at combination by inserting fresh rows
+        (the old rows remain — history is preserved for analysis).
+
+        Parameters
+        ----------
+        df : pd.DataFrame with columns matching the Forecast ORM model.
+
+        Returns
+        -------
+        int — number of rows inserted.
+        """
+        if df.empty:
+            return 0
+
+        rows_before = self._count_rows("forecasts")
+        records = df.to_dict(orient="records")
+        objs = []
+        for rec in records:
+            clean = {
+                k: (None if (isinstance(v, float) and v != v) else v)
+                for k, v in rec.items()
+                if hasattr(Forecast, k)
+            }
+            objs.append(Forecast(**clean))
+
+        with self._Session() as session:
+            session.add_all(objs)
+            session.commit()
+
+        inserted = self._count_rows("forecasts") - rows_before
+        log.info(f"[db] write_forecasts: {inserted} forecast rows inserted.")
+        return inserted
+
+    def read_forecasts(
+        self,
+        station_id: Optional[str] = None,
+        generated_at_min: Optional[datetime] = None,
+        limit: int = 72 * 15,  # 72 hours × 15 stations by default
+    ) -> pd.DataFrame:
+        """
+        Read forecast rows from the database.
+
+        Returns the most recent forecast generation for each station by default.
+
+        Parameters
+        ----------
+        station_id      : Filter to a single station (optional).
+        generated_at_min: Only rows generated at or after this UTC time.
+        limit           : Maximum rows to return.
+
+        Returns
+        -------
+        pd.DataFrame
+        """
+        query = "SELECT * FROM forecasts WHERE 1=1"
+        params: dict = {}
+
+        if station_id:
+            query += " AND station_id = :station_id"
+            params["station_id"] = station_id
+        if generated_at_min:
+            query += " AND generated_at >= :gen_min"
+            params["gen_min"] = generated_at_min.strftime("%Y-%m-%d %H:%M:%S")
+
+        query += " ORDER BY generated_at DESC, station_id ASC, forecast_hour ASC"
+        query += f" LIMIT {int(limit)}"
+
+        with self._engine.connect() as conn:
+            df = pd.read_sql(text(query), conn, params=params)
+
+        log.debug(f"[db] read_forecasts: {len(df)} rows returned.")
+        return df

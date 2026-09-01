@@ -13,10 +13,10 @@ uvicorn[standard]==0.30.1
 python-multipart==0.0.9   # required by FastAPI for form data
 
 # --- ML / Forecasting (Phase 6) ---
-xgboost==2.1.1
-scikit-learn==1.5.1
-shap==0.46.0
-joblib==1.4.2
+xgboost==3.4.1
+scikit-learn==1.9.0
+shap==0.52.0
+joblib==1.6.0
 # --- Data handling ---
 pandas==2.2.2
 numpy==1.26.4

@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/* ── Premium AeroAQI Custom CSS ─────────────────────────── */
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: #020817;
+  color: #f1f5f9;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(99,179,237,.25); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99,179,237,.45); }
+
+/* Live dot pulse */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .6; transform: scale(1.35); }
+}
+.live-dot { animation: pulse-live 1.8s ease-in-out infinite; }
+
+/* Gentle ambient float */
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-6px); }
+}
+.float-anim { animation: float-y 6s ease-in-out infinite; }
+
+/* AQI ring spin */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin-slow { animation: spin-slow 20s linear infinite; }
+
+/* Shimmer scan line */
+@keyframes scan {
+  0%   { top: 0%; opacity: .6; }
+  100% { top: 100%; opacity: 0; }
+}
+.scan-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(6,182,212,.5), transparent);
+  animation: scan 3s linear infinite;
+  pointer-events: none;
+}
+
+/* Glow orbs */
+.orb-cyan  { background: radial-gradient(circle, rgba(6,182,212,.18) 0%, transparent 70%); }
+.orb-blue  { background: radial-gradient(circle, rgba(59,130,246,.16) 0%, transparent 70%); }
+.orb-purple{ background: radial-gradient(circle, rgba(139,92,246,.15) 0%, transparent 70%); }
+
+/* Glass card */
+.glass {
+  background: rgba(7,25,54,.65);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.glass-dark {
+  background: rgba(4,14,38,.75);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,.06);
+}
+.glass-subtle {
+  background: rgba(15,35,70,.45);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.07);
+}
+
+/* Card hover glow */
+.card-hover {
+  transition: border-color .25s, box-shadow .25s, background .25s, transform .2s;
+}
+.card-hover:hover {
+  border-color: rgba(6,182,212,.3) !important;
+  box-shadow: 0 0 24px rgba(6,182,212,.08), 0 8px 32px rgba(0,0,0,.3);
+  transform: translateY(-1px);
+}
+
+/* Gradient text */
+.grad-cyan  { background: linear-gradient(135deg, #06b6d4, #3b82f6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.grad-blue  { background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.grad-purple{ background: linear-gradient(135deg, #8b5cf6, #ec4899); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Active nav item */
+.nav-active {
+  background: linear-gradient(135deg, rgba(6,182,212,.18), rgba(59,130,246,.12));
+  border: 1px solid rgba(6,182,212,.25);
+  box-shadow: 0 0 16px rgba(6,182,212,.08), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+/* AQI severity colors */
+.aqi-good        { color: #22c55e; }
+.aqi-moderate    { color: #eab308; }
+.aqi-sensitive   { color: #f97316; }
+.aqi-unhealthy   { color: #ef4444; }
+.aqi-very        { color: #a855f7; }
+.aqi-hazardous   { color: #b91c1c; }
+
+.bg-aqi-good       { background: rgba(34,197,94,.15);  border-color: rgba(34,197,94,.3); }
+.bg-aqi-moderate   { background: rgba(234,179,8,.15);  border-color: rgba(234,179,8,.3); }
+.bg-aqi-sensitive  { background: rgba(249,115,22,.15); border-color: rgba(249,115,22,.3); }
+.bg-aqi-unhealthy  { background: rgba(239,68,68,.15);  border-color: rgba(239,68,68,.3); }
+.bg-aqi-very       { background: rgba(168,85,247,.15); border-color: rgba(168,85,247,.3); }
+.bg-aqi-hazardous  { background: rgba(185,28,28,.15);  border-color: rgba(185,28,28,.3); }
+
+/* Premium button */
+.btn-primary {
+  background: linear-gradient(135deg, #0891b2, #3b82f6);
+  box-shadow: 0 4px 20px rgba(6,182,212,.3), 0 2px 8px rgba(0,0,0,.2);
+  transition: box-shadow .25s, transform .2s, filter .2s;
+}
+.btn-primary:hover {
+  box-shadow: 0 6px 28px rgba(6,182,212,.45), 0 4px 12px rgba(0,0,0,.3);
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+/* Tooltip */
+.tooltip-label {
+  background: rgba(4,14,38,.95) !important;
+  border: 1px solid rgba(6,182,212,.25) !important;
+  border-radius: 8px !important;
+  color: #e2e8f0 !important;
+  font-size: 11px !important;
+}
+
+/* Map grid bg */
+.map-grid {
+  background-image:
+    linear-gradient(rgba(6,182,212,.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6,182,212,.06) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Plume particle */
+@keyframes drift {
+  0%   { transform: translate(0,0) scale(1);   opacity: .7; }
+  100% { transform: translate(40px,-60px) scale(.3); opacity: 0; }
+}
+.particle { animation: drift 4s ease-out infinite; }
+.particle:nth-child(2) { animation-delay: .8s; }
+.particle:nth-child(3) { animation-delay: 1.6s; }
+.particle:nth-child(4) { animation-delay: 2.4s; }
+
+/* Forecast chart gradient */
+.recharts-area-area path { filter: drop-shadow(0 0 6px rgba(139,92,246,.4)); }
+
+/* Stat ticker */
+@keyframes ticker-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ticker { animation: ticker-up .4s ease-out; }
+
+/* Mobile nav overlay */
+.mobile-nav-overlay {
+  position: fixed; inset: 0;
+  background: rgba(2,8,23,.85);
+  backdrop-filter: blur(8px);
+  z-index: 40;
+}
+.mobile-nav-panel {
+  position: fixed; left: 0; top: 0; bottom: 0;
+  width: 280px;
+  z-index: 50;
+}

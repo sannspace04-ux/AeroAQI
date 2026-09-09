@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 
 from src.api.routers import fire, health, observations, pipeline, stations, weather
 from src.api.routers import forecast as forecast_router
+from src.api.routers import auth as auth_router
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -72,6 +73,7 @@ _TAGS = [
     {"name": "Fire / Hotspots", "description": "NASA FIRMS fire detections and transport risk"},
     {"name": "Pipeline",        "description": "Trigger and monitor the ingestion pipeline"},
     {"name": "Forecast",        "description": "72-hour AQI forecasts and SHAP explanations (Phase 6)"},
+    {"name": "Auth",            "description": "Email / phone OTP authentication"},
 ]
 
 
@@ -144,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(fire.router)
     app.include_router(pipeline.router)
     app.include_router(forecast_router.router)
+    app.include_router(auth_router.router)
 
     # ── Root redirect to docs ─────────────────────────────────────────────
     @app.get("/", include_in_schema=False)

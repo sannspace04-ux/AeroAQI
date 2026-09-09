@@ -40,7 +40,8 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Integer,
-    String, Text, create_engine, text, inspect as sa_inspect,
+    String, Text, UniqueConstraint,
+    create_engine, text, inspect as sa_inspect,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -115,6 +116,15 @@ class Observation(Base):
     wind_transport_idx    = Column(Float)
     mixing_volume_idx     = Column(Float)
     aqi_computed          = Column(Float)
+
+    # Unique constraint used by INSERT OR IGNORE for idempotent upserts.
+    # (timestamp_utc, station_id, data_source) identifies one observation row.
+    __table_args__ = (
+        UniqueConstraint(
+            "timestamp_utc", "station_id", "data_source",
+            name="uq_obs_ts_station_source",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,11 +245,15 @@ class DBClient:
         Write (upsert) rows from the master-schema DataFrame into the
         observations table.
 
-        Duplicate handling:
-          - If a row with the same (timestamp_utc, station_id, data_source)
-            already exists, it is skipped (not overwritten).
-          - This is an insert-if-not-exists strategy using SQLite's
-            INSERT OR IGNORE (and PostgreSQL's ON CONFLICT DO NOTHING).
+        Duplicate handling
+        ------------------
+        Uses ``INSERT OR IGNORE`` (SQLite) / ``INSERT … ON CONFLICT DO NOTHING``
+        (PostgreSQL) keyed on the unique constraint
+        ``(timestamp_utc, station_id, data_source)``.
+
+        This is an insert-if-not-exists strategy:  re-running the pipeline
+        will skip rows that already exist without raising an error or
+        over-writing existing data.
 
         Parameters
         ----------
@@ -262,24 +276,62 @@ class DBClient:
 
         rows_before = self._count_rows("observations")
 
-        # Convert DataFrame rows to ORM objects
-        records = df.to_dict(orient="records")
-        obs_objects = []
+        # Keep only columns that exist in the ORM model
+        orm_cols = {
+            c.key for c in Observation.__table__.columns
+            if c.key != "id"
+        }
+        records = df[[c for c in df.columns if c in orm_cols]].to_dict(
+            orient="records"
+        )
 
-        for rec in records:
-            # Clean NaN → None (SQLAlchemy/SQLite prefer None over float('nan'))
-            clean = {
-                k: (None if (isinstance(v, float) and v != v) else v)
-                for k, v in rec.items()
-                if hasattr(Observation, k)  # only known columns
-            }
-            obs_objects.append(Observation(**clean))
+        # Clean NaN → None and Timestamp → ISO string.
+        # SQLite stores datetimes as TEXT using the format
+        # "YYYY-MM-DD HH:MM:SS" (no T separator, no timezone suffix).
+        # read_observations compares with strftime("%Y-%m-%d %H:%M:%S"),
+        # so writes must use exactly the same format for string comparison
+        # to work correctly.
+        # Booleans are stored as INTEGER 0/1 (SQLite has no native BOOL).
+        def _clean(rec: dict) -> dict:
+            out = {}
+            for k, v in rec.items():
+                if v is None:
+                    out[k] = None
+                elif isinstance(v, float) and v != v:  # NaN check
+                    out[k] = None
+                elif isinstance(v, bool):
+                    out[k] = int(v)
+                elif hasattr(v, "strftime"):
+                    # pd.Timestamp, datetime.datetime, datetime.date
+                    # Normalise to SQLite text datetime format (UTC, no tz suffix)
+                    out[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    out[k] = v
+            return out
 
-        with self._Session() as session:
-            # Use merge so duplicates are handled gracefully
-            for obj in obs_objects:
-                session.merge(obj) if obj.id else session.add(obj)
-            session.commit()
+        is_sqlite = self._engine.dialect.name == "sqlite"
+
+        with self._engine.begin() as conn:
+            for rec in records:
+                clean = _clean(rec)
+                cols = list(clean.keys())
+                placeholders = ", ".join(f":{c}" for c in cols)
+                col_clause = ", ".join(cols)
+
+                if is_sqlite:
+                    sql = (
+                        f"INSERT OR IGNORE INTO observations "
+                        f"({col_clause}) VALUES ({placeholders})"
+                    )
+                else:
+                    # PostgreSQL — ON CONFLICT DO NOTHING
+                    sql = (
+                        f"INSERT INTO observations "
+                        f"({col_clause}) VALUES ({placeholders}) "
+                        f"ON CONFLICT (timestamp_utc, station_id, data_source) "
+                        f"DO NOTHING"
+                    )
+                conn.execute(text(sql), clean)
 
         rows_after = self._count_rows("observations")
         inserted = rows_after - rows_before
@@ -470,25 +522,103 @@ class DBClient:
             log.info(f"[db] migrate_schema: {len(added)} column(s) added: {added}")
         else:
             log.debug("[db] migrate_schema: schema is already up to date.")
+
+        # Ensure the unique index used by INSERT OR IGNORE exists.
+        # CREATE INDEX IF NOT EXISTS is safe to call repeatedly.
+        with self._engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_obs_ts_station_source "
+                "ON observations (timestamp_utc, station_id, data_source)"
+            ))
+            log.debug("[db] migrate_schema: unique index uq_obs_ts_station_source ensured.")
+
         return added
 
     def write_master_dataset(self, df: pd.DataFrame) -> int:
         """
-        Persist master dataset rows — same as write_observations but
-        explicitly named for clarity when called from the processing pipeline.
+        Persist feature-engineered master data back into existing observations.
 
-        The master dataset is the merged, feature-engineered output that
-        includes derived columns (inversion_strength, fire_transport_risk, etc.).
+        Existing rows are updated using:
+        (timestamp_utc, station_id, data_source)
 
-        Parameters
-        ----------
-        df : pd.DataFrame matching or subset-matching the master schema.
-
-        Returns
-        -------
-        int — number of new rows inserted.
+        Raw ingestion continues to use write_observations(), which
+        intentionally uses INSERT OR IGNORE.
         """
-        return self.write_observations(df)
+        if df.empty:
+            log.warning("[db] write_master_dataset called with empty DataFrame.")
+            return 0
+
+        required = ["timestamp_utc", "station_id", "data_source"]
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"DataFrame is missing required columns for master DB update: {missing}"
+            )
+
+        # Only update columns that actually exist in the observations table.
+        orm_cols = {
+            c.key for c in Observation.__table__.columns
+            if c.key != "id"
+        }
+
+        update_cols = [
+            c for c in df.columns
+            if c in orm_cols and c not in required
+        ]
+
+        def _clean_value(v):
+            if v is None:
+                return None
+
+            if isinstance(v, float) and v != v:
+                return None
+
+            if isinstance(v, bool):
+                return int(v)
+
+            if hasattr(v, "strftime"):
+                return v.strftime("%Y-%m-%d %H:%M:%S")
+
+            return v
+
+        updated = 0
+
+        with self._engine.begin() as conn:
+            for _, row in df.iterrows():
+
+                params = {
+                    "timestamp_utc": _clean_value(row["timestamp_utc"]),
+                    "station_id": _clean_value(row["station_id"]),
+                    "data_source": _clean_value(row["data_source"]),
+                }
+
+                for col in update_cols:
+                    params[col] = _clean_value(row[col])
+
+                set_clause = ", ".join(
+                    f"{col} = :{col}"
+                    for col in update_cols
+                )
+
+                sql = text(
+                    f"""
+                    UPDATE observations
+                    SET {set_clause}
+                    WHERE timestamp_utc = :timestamp_utc
+                      AND station_id = :station_id
+                      AND data_source = :data_source
+                    """
+                )
+
+                result = conn.execute(sql, params)
+                updated += result.rowcount
+
+        log.info(
+            f"[db] write_master_dataset: {updated} existing observation rows updated "
+            f"({len(df)} attempted)."
+        )
+
+        return updated
 
     def read_fire_detections(
         self,

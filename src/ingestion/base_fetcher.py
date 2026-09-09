@@ -100,7 +100,7 @@ class BaseFetcher(ABC):
         """Return True if this source is enabled in data_sources.yaml."""
         return bool(self.config.get("enabled", True))
 
-    def run(self, **kwargs) -> pd.DataFrame | None:
+    def run(self, **kwargs) -> pd.DataFrame:
         """
         Execute the full fetch → save_raw → normalise → validate → save cycle.
 
@@ -112,24 +112,42 @@ class BaseFetcher(ABC):
 
         Returns
         -------
-        pd.DataFrame | None
-            Clean DataFrame conforming to the master schema, or None if the
-            fetch failed or the source is disabled.
+        pd.DataFrame
+            Clean DataFrame conforming to the master schema.
+            Returns an **empty** DataFrame (never ``None``) in all failure
+            cases so callers can always check ``df.empty`` safely.
+
+        Raises
+        ------
+        Exception
+            Re-raises the underlying fetch exception so the pipeline can
+            record the real error message rather than a generic "returned None".
+            The exception is only raised when the fetch itself fails (network
+            error, HTTP error, missing API key, etc.).  Normalisation failures
+            and validation failures return an empty DataFrame instead.
         """
+        from src.schema.master_schema import empty_master_dataframe
+
         if not self.is_enabled():
             log.info(f"[{self.source_name}] Source is disabled — skipping.")
-            return None
+            return empty_master_dataframe()
 
         log.info(f"[{self.source_name}] Starting fetch. kwargs={kwargs}")
 
         # --- Step 1: Fetch raw data with retry ---
+        # _fetch_with_retry now re-raises the last exception on total failure
+        # instead of silently returning None.
         raw_data = self._fetch_with_retry(**kwargs)
+
+        # _fetch_with_retry returns None only when all retries were exhausted
+        # and the last exception was already logged.  Surface it as an empty df
+        # so _run_source can record "no_data" rather than crashing on None.head().
         if raw_data is None:
             log.error(
                 f"[{self.source_name}] Fetch failed after all retries — "
-                f"this source will be skipped for this run."
+                f"returning empty DataFrame."
             )
-            return None
+            return empty_master_dataframe()
 
         # --- Step 2: Persist raw data ---
         self._save_raw(raw_data, **kwargs)
@@ -143,13 +161,15 @@ class BaseFetcher(ABC):
                 f"[{self.source_name}] Normalisation failed: {exc}",
                 exc_info=True,
             )
-            return None
+            return empty_master_dataframe()
 
+        # Normalise may legitimately return None or empty (e.g. all records
+        # filtered out).  Treat both as "no data" rather than as errors.
         if df is None or df.empty:
             log.warning(
                 f"[{self.source_name}] Normalisation returned an empty DataFrame."
             )
-            return None
+            return empty_master_dataframe()
 
         # --- Step 4: Validate ---
         df, success = run_all_validations(df, self.source_name)
@@ -157,7 +177,7 @@ class BaseFetcher(ABC):
             log.error(
                 f"[{self.source_name}] Validation failed — results not saved."
             )
-            return None
+            return empty_master_dataframe()
 
         # --- Step 5: Save processed Parquet ---
         self._save_processed(df, **kwargs)
@@ -209,13 +229,27 @@ class BaseFetcher(ABC):
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _fetch_with_retry(self, **kwargs) -> Any | None:
+    def _fetch_with_retry(self, **kwargs) -> object:
         """
-        Call _fetch_raw() up to `retry_attempts` times with exponential backoff.
-        Returns None if all attempts fail.
+        Call _fetch_raw() up to ``retry_attempts`` times with exponential
+        back-off.
+
+        Returns the raw data on success.
+
+        Raises
+        ------
+        Exception
+            Re-raises the *last* exception when all attempts are exhausted,
+            so the caller (and the pipeline audit log) see the real error
+            message instead of a generic "returned None".
+
+        The only case where ``None`` is returned (not raised) is when
+        ``_fetch_raw`` itself explicitly returns ``None`` — which should
+        not happen in practice; all fetchers either return data or raise.
         """
         attempts: int = int(self.config.get("retry_attempts", 3))
         backoff: float = float(self.config.get("retry_backoff_sec", 5))
+        last_exc: Exception | None = None
 
         for attempt in range(1, attempts + 1):
             try:
@@ -227,17 +261,24 @@ class BaseFetcher(ABC):
                 return result
 
             except Exception as exc:
+                last_exc = exc
                 log.warning(
-                    f"[{self.source_name}] Attempt {attempt}/{attempts} failed: {exc}"
+                    f"[{self.source_name}] Attempt {attempt}/{attempts} failed: "
+                    f"{type(exc).__name__}: {exc}"
                 )
                 if attempt < attempts:
-                    wait = backoff * (2 ** (attempt - 1))   # exponential back-off
+                    wait = backoff * (2 ** (attempt - 1))
                     log.info(
                         f"[{self.source_name}] Waiting {wait:.0f}s before retry …"
                     )
                     time.sleep(wait)
 
-        return None
+        # All retries exhausted — re-raise so the pipeline records the real error.
+        log.error(
+            f"[{self.source_name}] All {attempts} fetch attempt(s) failed. "
+            f"Last error: {last_exc}"
+        )
+        raise last_exc  # type: ignore[misc]
 
     def _save_raw(self, raw_data: Any, **kwargs) -> Path:
         """

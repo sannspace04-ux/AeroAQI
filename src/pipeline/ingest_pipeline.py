@@ -171,11 +171,18 @@ class IngestionPipeline:
                 "[pipeline] ERA5 skipped (realtime mode). "
                 "ERA5 is only used for historical training data."
             )
-            results.append(SourceResult(
+            era5_result = SourceResult(
                 source_name="era5",
                 status="skipped",
                 error_message="ERA5 not run in realtime mode.",
-            ))
+            )
+            # Log the skip so it appears in GET /pipeline/runs
+            self._db.log_run(
+                "era5", "skipped",
+                mode=mode,
+                error_message=era5_result.error_message,
+            )
+            results.append(era5_result)
 
         # --- 6. Phase 4 processing (fire aggregation + feature engineering) ---
         processing_result = self._run_processing(
@@ -283,11 +290,16 @@ class IngestionPipeline:
                     "[pipeline] No trained model found — skipping forecast inference. "
                     "Run: python scripts/train_model.py"
                 )
-                return SourceResult(
+                skip_result = SourceResult(
                     source_name="forecast",
                     status="skipped",
                     error_message="No trained model. Run scripts/train_model.py first.",
                 )
+                self._db.log_run(
+                    "forecast", "skipped",
+                    error_message=skip_result.error_message,
+                )
+                return skip_result
 
             # Load recent observations (last 72 h = enough for lag features)
             from datetime import datetime, timedelta, timezone
@@ -297,7 +309,9 @@ class IngestionPipeline:
 
             if obs_df.empty:
                 log.info("[pipeline] No recent observations — skipping forecast inference.")
-                return SourceResult(source_name="forecast", status="no_data")
+                no_data_result = SourceResult(source_name="forecast", status="no_data")
+                self._db.log_run("forecast", "no_data")
+                return no_data_result
 
             import pandas as pd
             obs_df["timestamp_utc"] = pd.to_datetime(
@@ -365,11 +379,13 @@ class IngestionPipeline:
 
             if not all_forecast_rows:
                 duration = time.monotonic() - t_start
-                return SourceResult(
+                no_data_result = SourceResult(
                     source_name="forecast",
                     status="no_data",
                     duration_sec=duration,
                 )
+                self._db.log_run("forecast", "no_data", duration_sec=duration)
+                return no_data_result
 
             rows_written = self._db.write_forecasts(pd.DataFrame(all_forecast_rows))
             duration = time.monotonic() - t_start
@@ -377,6 +393,11 @@ class IngestionPipeline:
             log.info(
                 f"[pipeline] Forecast inference complete — "
                 f"{rows_written} rows written for {len(stations)} stations."
+            )
+            self._db.log_run(
+                "forecast", "success",
+                rows_written=rows_written,
+                duration_sec=duration,
             )
             return SourceResult(
                 source_name="forecast",
@@ -389,6 +410,11 @@ class IngestionPipeline:
             duration = time.monotonic() - t_start
             msg = f"Missing dependency: {exc}"
             log.warning(f"[pipeline] Forecast inference skipped — {msg}")
+            self._db.log_run(
+                "forecast", "skipped",
+                duration_sec=duration,
+                error_message=msg,
+            )
             return SourceResult(
                 source_name="forecast",
                 status="skipped",
@@ -399,6 +425,11 @@ class IngestionPipeline:
             duration = time.monotonic() - t_start
             msg = f"{type(exc).__name__}: {exc}"
             log.error(f"[pipeline] Forecast inference failed: {msg}", exc_info=True)
+            self._db.log_run(
+                "forecast", "failed",
+                duration_sec=duration,
+                error_message=msg,
+            )
             return SourceResult(
                 source_name="forecast",
                 status="failed",
@@ -421,6 +452,7 @@ class IngestionPipeline:
         """
         if self._skip_processing:
             log.info("[pipeline] Processing step skipped (skip_processing=True).")
+            self._db.log_run("processing", "skipped", mode=mode)
             return SourceResult(source_name="processing", status="skipped")
 
         log.info("[pipeline] ── Starting Phase 4 processing ──")
@@ -441,6 +473,11 @@ class IngestionPipeline:
                     "[pipeline] Processing returned an empty master dataset. "
                     "This is normal when no observations are in the DB yet."
                 )
+                self._db.log_run(
+                    "processing", "no_data",
+                    mode=mode,
+                    duration_sec=duration,
+                )
                 return SourceResult(
                     source_name="processing",
                     status="no_data",
@@ -451,6 +488,12 @@ class IngestionPipeline:
             report = QualityReport(master_df, source_name="master_dataset")
             report.print_report()
 
+            self._db.log_run(
+                "processing", "success",
+                rows_written=len(master_df),
+                mode=mode,
+                duration_sec=duration,
+            )
             return SourceResult(
                 source_name="processing",
                 status="success",
@@ -464,6 +507,12 @@ class IngestionPipeline:
             log.error(
                 f"[pipeline] Processing step failed: {msg}",
                 exc_info=True,
+            )
+            self._db.log_run(
+                "processing", "failed",
+                mode=mode,
+                duration_sec=duration,
+                error_message=msg,
             )
             return SourceResult(
                 source_name="processing",
@@ -487,8 +536,20 @@ class IngestionPipeline:
         Instantiate a fetcher, call run(), write results to DB,
         log the audit record, and return a SourceResult.
 
-        All exceptions are caught here so one source failure
-        does not abort the entire pipeline run.
+        Behaviour contract after BaseFetcher changes
+        --------------------------------------------
+        • fetcher.run() now always returns a pd.DataFrame (never None).
+          An empty DataFrame means either:
+            - The source returned zero records for the requested window.
+            - Normalisation or validation produced no valid rows.
+          A non-empty DataFrame means fetch + normalise + validate succeeded.
+
+        • If the underlying network/API call fails (HTTP error, missing key,
+          connection timeout), fetcher.run() re-raises the exception.
+          That exception is caught here and recorded as status="failed" with
+          the real error message, so GET /pipeline/runs shows the exact cause.
+
+        • One source failure never aborts the pipeline for other sources.
         """
         if source_name in self._skip_sources:
             log.info(f"[pipeline] {source_name}: skipped by caller request.")
@@ -509,37 +570,35 @@ class IngestionPipeline:
                 )
                 return SourceResult(source_name=source_name, status="skipped")
 
-            df: Optional[pd.DataFrame] = fetcher.run(**kwargs)
+            df: pd.DataFrame = fetcher.run(**kwargs)
             duration = time.monotonic() - t_start
 
-            if df is None:
-                # Fetcher returned None — fetch or validation failed
-                self._db.log_run(
-                    source_name, "failed",
-                    mode=kwargs.get("mode", "realtime"),
-                    duration_sec=duration,
-                    error_message="Fetcher returned None",
-                )
-                return SourceResult(
-                    source_name=source_name,
-                    status="failed",
-                    duration_sec=duration,
-                    error_message="Fetcher returned None",
-                )
-
-            # GADM returns an empty DataFrame (output is GeoJSON files)
+            # GADM writes GeoJSON files and returns an empty DataFrame —
+            # that is its expected "success" state.
             if df.empty:
                 status = "success" if source_name == "gadm" else "no_data"
+                no_data_msg = (
+                    None if source_name == "gadm"
+                    else (
+                        f"Source '{source_name}' returned zero records for the "
+                        f"requested window.  This is normal if no data has been "
+                        f"ingested yet or if the API returned no results."
+                    )
+                )
                 self._db.log_run(
                     source_name, status,
                     rows_written=0,
                     mode=kwargs.get("mode", "realtime"),
                     duration_sec=duration,
+                    error_message=no_data_msg,
                 )
+                if no_data_msg:
+                    log.info(f"[pipeline] {source_name}: {no_data_msg}")
                 return SourceResult(
                     source_name=source_name,
                     status=status,
                     duration_sec=duration,
+                    error_message=no_data_msg,
                 )
 
             # Write to database
@@ -561,7 +620,7 @@ class IngestionPipeline:
             )
 
         except EnvironmentError as exc:
-            # Missing API key — clear, actionable error
+            # Missing / placeholder API key — clear, actionable error.
             duration = time.monotonic() - t_start
             msg = (
                 f"API key / credentials not configured for '{source_name}'. "
@@ -582,10 +641,12 @@ class IngestionPipeline:
             )
 
         except Exception as exc:
+            # Preserve the real exception type and message so the audit log
+            # and GET /pipeline/runs show exactly what went wrong.
             duration = time.monotonic() - t_start
             msg = f"{type(exc).__name__}: {exc}"
             log.error(
-                f"[pipeline] {source_name}: unexpected error — {msg}",
+                f"[pipeline] {source_name}: {msg}",
                 exc_info=True,
             )
             self._db.log_run(

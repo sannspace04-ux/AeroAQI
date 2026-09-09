@@ -58,6 +58,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# Load .env before importing anything from src/ so that environment
+# variables are available when config_loader, fetchers and DB client
+# are first imported.  load_dotenv() is a no-op if the file is absent.
+from dotenv import load_dotenv
+load_dotenv(_PROJECT_ROOT / ".env", override=False)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

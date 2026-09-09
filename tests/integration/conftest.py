@@ -76,6 +76,11 @@ def mem_db() -> DBClient:
     db._engine = engine
     db._Session = sessionmaker(bind=engine)
 
+    # migrate_schema() creates the unique index used by INSERT OR IGNORE
+    # in write_observations.  It must run before any seeding so the index
+    # exists when the first write happens.
+    db.migrate_schema()
+
     _seed(db)
     return db
 

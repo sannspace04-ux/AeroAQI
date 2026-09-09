@@ -1,209 +1,135 @@
-# =============================================================================
-# config/data_sources.yaml
-# =============================================================================
-# Central switch-board for all data sources in AeroAQI.
-#
-# HOW TO USE:
-#   - Set  enabled: true   to include a source in the pipeline run.
-#   - Set  enabled: false  to skip it without touching any code.
-#   - API keys are NEVER stored here — they live in .env only.
-#
-# FETCH MODES:
-#   realtime   — fetches the latest available data (last N hours)
-#   historical — fetches a date range specified at runtime
-#   static     — downloads a file once and caches it (e.g. shapefiles)
-# =============================================================================
-
 sources:
-
-  # ---------------------------------------------------------------------------
-  # 1. OpenAQ — ground-level air quality observations
-  #    Provides: pm25, pm10, o3, no2, so2, co, aqi_raw
-  #    API key:  OPENAQ_API_KEY in .env (free registration)
-  # ---------------------------------------------------------------------------
   openaq:
     enabled: true
-    fetch_mode: realtime          # also supports historical
-    base_url: "https://api.openaq.org/v3"
-    # How many hours back to fetch in a realtime run
+    fetch_mode: realtime
+    base_url: https://api.openaq.org/v3
     realtime_lookback_hours: 48
-    # Hard date limits for historical backfill (ISO 8601)
-    historical_start: "2022-01-01"
-    historical_end:   "2024-12-31"
-    # OpenAQ location IDs for Delhi NCR stations (matched to stations.yaml)
-    # Verify/update these IDs at: https://explore.openaq.org
+    historical_start: '2022-01-01'
+    historical_end: '2024-12-31'
     location_ids:
-      - 8118    # Anand Vihar, Delhi
-      - 8119    # ITO, Delhi
-      - 8120    # Punjabi Bagh, Delhi
-      - 8121    # Dwarka Sector-8, Delhi
-      - 8122    # R.K. Puram, Delhi
-      - 8123    # Rohini, Delhi
-      - 8124    # Mundka, Delhi
-      - 8125    # Okhla Phase-2, Delhi
-      - 8126    # Nehru Nagar, Delhi
-      - 8127    # DTU, Delhi
-      - 8193    # Sector-62, Noida
-      - 8194    # Sector-1, Noida
-      - 8200    # Vikas Sadan, Gurugram
-      - 8201    # Faridabad, Haryana
-      - 8202    # Vasundhara, Ghaziabad
-    # Pollutant parameter names as used by OpenAQ v3
+    - 235
+    - 16
+    - 17
+    - 50
+    - 103
+    - 236
+    - 2587
+    - 5404
+    - 5541
+    - 5613
+    - 5616
+    - 5665
+    - 5742
+    - 6980
+    - 6359
     parameters:
-      - pm25
-      - pm10
-      - o3
-      - no2
-      - so2
-      - co
-    # Request settings
-    page_size: 1000               # results per API page
+    - pm25
+    - pm10
+    - o3
+    - no2
+    - so2
+    - co
+    page_size: 1000
     request_timeout_sec: 30
     retry_attempts: 3
     retry_backoff_sec: 5
-
-  # ---------------------------------------------------------------------------
-  # 2. Open-Meteo — weather forecast + atmospheric profile + AQ forecast
-  #    Provides: temperature, relative_humidity, wind_speed, wind_direction,
-  #              surface_pressure, precipitation, solar_radiation, pbl_height,
-  #              temp_925hpa, temp_850hpa, temp_700hpa
-  #    API key:  NONE required for non-commercial use
-  # ---------------------------------------------------------------------------
   openmeteo:
     enabled: true
-    fetch_mode: realtime          # also supports historical via past_days param
-    base_url: "https://api.open-meteo.com/v1/forecast"
-    historical_base_url: "https://archive-api.open-meteo.com/v1/archive"
-    air_quality_url: "https://air-quality-api.open-meteo.com/v1/air-quality"
-    # Forecast horizon in hours (max 240 for free tier)
+    fetch_mode: realtime
+    base_url: https://api.open-meteo.com/v1/forecast
+    historical_base_url: https://archive-api.open-meteo.com/v1/archive
+    air_quality_url: https://air-quality-api.open-meteo.com/v1/air-quality
     forecast_hours: 72
-    # For historical runs: how many days back from today
     historical_days: 365
-    # Historical start for training data backfill
-    historical_start: "2022-01-01"
-    # Surface-level variables to request
+    historical_start: '2022-01-01'
     hourly_variables:
-      - temperature_2m
-      - relative_humidity_2m
-      - wind_speed_10m
-      - wind_direction_10m
-      - surface_pressure
-      - precipitation
-      - shortwave_radiation
-      - boundary_layer_height
-    # Pressure-level variables for inversion detection
+    - temperature_2m
+    - relative_humidity_2m
+    - wind_speed_10m
+    - wind_direction_10m
+    - surface_pressure
+    - precipitation
+    - shortwave_radiation
+    - boundary_layer_height
     pressure_level_variables:
-      - temperature
+    - temperature
     pressure_levels:
-      - 925
-      - 850
-      - 700
+    - 925
+    - 850
+    - 700
     request_timeout_sec: 30
     retry_attempts: 3
     retry_backoff_sec: 5
-
-  # ---------------------------------------------------------------------------
-  # 3. ERA5 (Copernicus Climate Data Store)
-  #    Provides: same weather + profile variables as Open-Meteo but as
-  #              a high-quality reanalysis for TRAINING DATA only.
-  #              NOT suitable for real-time inference (5-day latency).
-  #    API key:  CDS_API_KEY in .env (free CDS account required)
-  # ---------------------------------------------------------------------------
   era5:
     enabled: true
-    fetch_mode: historical        # reanalysis — historical only
-    # Dataset identifiers on CDS
-    single_level_dataset: "reanalysis-era5-single-levels"
-    pressure_level_dataset: "reanalysis-era5-pressure-levels"
-    # Bounding box: [lat_max, lon_min, lat_max, lon_max] — covers Delhi NCR + buffer
-    area: [33.0, 72.5, 27.0, 80.0]   # North, West, South, East
-    # Grid resolution (degrees)
-    grid: [0.25, 0.25]
-    # Date range for the training dataset
-    historical_start: "2022-01-01"
-    historical_end:   "2024-12-31"
-    # CDS variable names for single-level download
+    fetch_mode: historical
+    single_level_dataset: reanalysis-era5-single-levels
+    pressure_level_dataset: reanalysis-era5-pressure-levels
+    area:
+    - 33.0
+    - 72.5
+    - 27.0
+    - 80.0
+    grid:
+    - 0.25
+    - 0.25
+    historical_start: '2022-01-01'
+    historical_end: '2024-12-31'
     single_level_variables:
-      - "2m_temperature"
-      - "2m_dewpoint_temperature"
-      - "10m_u_component_of_wind"
-      - "10m_v_component_of_wind"
-      - "surface_pressure"
-      - "total_precipitation"
-      - "surface_solar_radiation_downwards"
-      - "boundary_layer_height"
-    # CDS variable names for pressure-level download
+    - 2m_temperature
+    - 2m_dewpoint_temperature
+    - 10m_u_component_of_wind
+    - 10m_v_component_of_wind
+    - surface_pressure
+    - total_precipitation
+    - surface_solar_radiation_downwards
+    - boundary_layer_height
     pressure_level_variables:
-      - "temperature"
-      - "specific_humidity"
+    - temperature
+    - specific_humidity
     pressure_levels:
-      - "700"
-      - "850"
-      - "925"
-    # Output format
-    format: "netcdf"
-    # Local staging directory (relative to project root)
-    download_dir: "data/raw/era5"
-    request_timeout_sec: 600     # ERA5 downloads can be slow
+    - '700'
+    - '850'
+    - '925'
+    format: netcdf
+    download_dir: data/raw/era5
+    request_timeout_sec: 600
     retry_attempts: 2
     retry_backoff_sec: 60
-
-  # ---------------------------------------------------------------------------
-  # 4. NASA FIRMS — fire / hotspot data (MODIS + VIIRS)
-  #    Provides: fire lat, lon, fire radiative power (FRP), confidence,
-  #              acquisition timestamp, satellite name
-  #    API key:  FIRMS_MAP_KEY in .env (free NASA registration)
-  # ---------------------------------------------------------------------------
   firms:
     enabled: true
-    fetch_mode: realtime          # also supports historical
-    base_url: "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
-    # Satellite product: VIIRS_SNPP_NRT (375 m, near real-time, ~3h latency)
-    # Alternatives: MODIS_NRT (1 km), VIIRS_NOAA20_NRT
-    product: "VIIRS_SNPP_NRT"
-    # Bounding box for Punjab + Haryana + Delhi NCR stubble-burn source region
-    # Format: lon_min,lat_min,lon_max,lat_max
-    bbox: "73.0,27.5,80.0,33.0"
-    # How many days back to fetch (1–10 for NRT product)
+    fetch_mode: realtime
+    base_url: https://firms.modaps.eosdis.nasa.gov/api/area/csv
+    product: VIIRS_SNPP_NRT
+    bbox: 73.0,27.5,80.0,33.0
     day_range: 2
-    # Confidence filter: keep only 'nominal' and 'high' confidence fires
-    min_confidence: "nominal"     # values: low | nominal | high
-    # Columns expected in FIRMS CSV response
+    min_confidence: nominal
     expected_columns:
-      - latitude
-      - longitude
-      - bright_ti4
-      - scan
-      - track
-      - acq_date
-      - acq_time
-      - satellite
-      - instrument
-      - confidence
-      - version
-      - bright_ti5
-      - frp
-      - daynight
+    - latitude
+    - longitude
+    - bright_ti4
+    - scan
+    - track
+    - acq_date
+    - acq_time
+    - satellite
+    - instrument
+    - confidence
+    - version
+    - bright_ti5
+    - frp
+    - daynight
     request_timeout_sec: 60
     retry_attempts: 3
     retry_backoff_sec: 10
-
-  # ---------------------------------------------------------------------------
-  # 5. GADM — administrative boundary shapefiles (one-time static download)
-  #    Provides: state and district polygons for India
-  #    API key:  NONE required
-  # ---------------------------------------------------------------------------
   gadm:
     enabled: true
-    fetch_mode: static            # download once, then reuse cached file
-    # GADM v4.1 India download URL
-    download_url: "https://geodata.ucdavis.edu/gadm/gadm4.1/shp/gadm41_IND_shp.zip"
-    download_dir: "data/raw/gadm"
-    # Levels: 0=country, 1=state, 2=district
+    fetch_mode: static
+    download_url: https://geodata.ucdavis.edu/gadm/gadm4.1/shp/gadm41_IND_shp.zip
+    download_dir: data/raw/gadm
     levels_to_keep:
-      - 1    # states (for Punjab, Haryana, UP, Rajasthan source regions)
-      - 2    # districts (for Delhi NCR zone mapping)
-    # Force re-download even if file already exists
+    - 1
+    - 2
     force_download: false
     request_timeout_sec: 120
     retry_attempts: 2

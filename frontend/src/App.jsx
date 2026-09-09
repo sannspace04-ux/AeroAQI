@@ -765,42 +765,107 @@ function NcrMapPanel() {
   const cx=lonToX(center.lon), cy=latToY(center.lat);
   const tiles=[]; const tileX=Math.floor(cx/tileSize),tileY=Math.floor(cy/tileSize); for(let dx=-2;dx<=2;dx++) for(let dy=-1;dy<=1;dy++){let x=tileX+dx,y=tileY+dy,n=Math.pow(2,zoom);if(x<0||x>=n||y<0||y>=n)continue;tiles.push({x,y,key:`${x}-${y}`,left:x*tileSize-cx+420,top:y*tileSize-cy+210});}
   const markerPos=s=>({left:420+(lonToX(s.lon)-cx),top:210+(latToY(s.lat)-cy)});
-  const dot={good:"#22c55e",moderate:"#eab308",sensitive:"#f97316",unhealthy:"#ef4444",very:"#a855f7"};
+
+  // Derive marker colour directly from the numeric AQI value so all 15 stations
+  // render with a visible marker even when some have no observation data.
+  // Stations without AQI data fall back to a neutral slate colour.
+  const aqiColour = aqi => {
+    if (aqi == null || !Number.isFinite(aqi)) return "#64748b"; // slate — no data
+    if (aqi <= 50)  return "#22c55e"; // green
+    if (aqi <= 100) return "#eab308"; // yellow
+    if (aqi <= 200) return "#f97316"; // orange
+    if (aqi <= 300) return "#ef4444"; // red
+    return "#a855f7";                 // purple
+  };
+
   return <div id="map-section" className="card-hover rounded-2xl p-5 flex flex-col gap-4" style={{background:"rgba(7,28,20,.82)",border:"1px solid rgba(255,255,255,.07)",backdropFilter:"blur(16px)"}}>
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><p className="text-sm font-bold text-white">Delhi-NCR Air Quality Map</p><p className="text-[10px] text-slate-500 mt-0.5">Live-style spatial view · Delhi + surrounding NCR districts</p></div><div className="flex gap-2"><span className="flex items-center gap-1 text-[10px] text-green-400 px-2 py-1 rounded-full" style={{background:"rgba(34,197,94,.1)",border:"1px solid rgba(34,197,94,.2)"}}><span className="live-dot w-1.5 h-1.5 rounded-full bg-green-400"/>{loading?"Updating…":live?"Live AQI":"Fallback AQI"}</span><button onClick={()=>setShowStations(v=>!v)} className="text-[10px] px-2.5 py-1 rounded-lg text-slate-300" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.07)"}}>{showStations?"Hide stations":"Show stations"}</button></div></div>
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><p className="text-sm font-bold text-white">Delhi-NCR Air Quality Map</p><p className="text-[10px] text-slate-500 mt-0.5">Live-style spatial view · Delhi + surrounding NCR districts</p></div><div className="flex gap-2"><span className="flex items-center gap-1 text-[10px] text-green-400 px-2 py-1 rounded-full" style={{background:"rgba(34,197,94,.1)",border:"1px solid rgba(34,197,94,.2)"}}><span className="live-dot w-1.5 h-1.5 rounded-full bg-green-400"/>{loading?"Updating…":live?"Live AQI":"Unavailable"}</span><button onClick={()=>setShowStations(v=>!v)} className="text-[10px] px-2.5 py-1 rounded-lg text-slate-300" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.07)"}}>{showStations?"Hide stations":"Show stations"}</button></div></div>
     <div className="relative rounded-xl overflow-hidden h-[480px]" style={{background:"#08121d",border:"1px solid rgba(255,255,255,.08)"}}>
       <div className="absolute inset-0 overflow-hidden" style={{filter:layer==="dark"?"brightness(.62) invert(.88) hue-rotate(180deg) saturate(.78) contrast(1.18)":"none",transition:"filter .35s ease"}}>{tiles.map(t=><img key={t.key} alt="NCR map tile" src={`https://tile.openstreetmap.org/${zoom}/${t.x}/${t.y}.png`} className="absolute w-64 h-64" style={{left:t.left,top:t.top,maxWidth:"none"}} onError={e=>{e.currentTarget.style.opacity=.25}}/> )}</div>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_0,rgba(2,8,23,.2)_70%)] pointer-events-none"/><div className="absolute inset-0 pointer-events-none" style={{background:"radial-gradient(circle at 24% 38%,rgba(34,197,94,.10),transparent 13%),radial-gradient(circle at 57% 47%,rgba(234,179,8,.08),transparent 14%),radial-gradient(circle at 72% 42%,rgba(239,68,68,.10),transparent 13%),radial-gradient(circle at 45% 66%,rgba(249,115,22,.08),transparent 12%)",mixBlendMode:layer==="dark"?"screen":"multiply",opacity:.9}}/>
-      {showStations&&liveStations.map(s=>{const p=markerPos(s),c=dot[s.status];return <button key={s.name} onClick={()=>setSelected(s)} className="absolute -translate-x-1/2 -translate-y-1/2 group" style={{left:p.left,top:p.top}}><span className="block rounded-full" style={{width:selected?.name===s.name?32:26,height:selected?.name===s.name?32:26,background:`${c}33`,border:`1px solid ${c}77`,boxShadow:`0 0 18px ${c}66`}}><span className="flex items-center justify-center h-full text-[10px] font-black text-white">
-  {s.aqi != null ? Math.round(s.aqi) : "—"}
-</span></span><span className="absolute left-1/2 -translate-x-1/2 top-full mt-1 whitespace-nowrap text-[9px] font-semibold text-white drop-shadow-lg">{s.name}</span></button>})}
-      {selected&&<div className="absolute left-3 top-3 rounded-xl p-3 w-48" style={{background:"rgba(2,12,7,.96)",border:`1px solid ${dot[selected.status]}55`,backdropFilter:"blur(12px)"}}><div className="flex items-center justify-between"><p className="text-[9px] text-slate-500">Selected station</p><button onClick={()=>setSelected(null)} className="text-slate-500"><X size={12}/></button></div><p className="text-sm font-bold text-white mt-1">{selected.name}</p><p className="text-2xl font-black" style={{color:dot[selected.status]}}>
-  {selected.aqi != null ? Math.round(selected.aqi) : "—"}
-</p>
-<p className="text-[10px] text-slate-400">
-  AQI · {selected.aqi != null ? aqiLabel(selected.aqi) : "Unavailable"}
-</p>
 
-<div className="grid grid-cols-2 gap-2 mt-2">
-  <div>
-    <p className="text-[9px] text-slate-600">PM2.5</p>
-    <p className="text-[10px] text-white font-semibold">
-      {selected.pm25 != null ? `${Math.round(selected.pm25)} µg/m³` : "—"}
-    </p>
-  </div>
-  <div>
-    <p className="text-[9px] text-slate-600">Trend</p>
-    <p className="text-[10px] text-slate-400">Live data</p>
-  </div>
-</div>
-</div>}
+      {/* Station markers — one per backend station, visible regardless of obs availability */}
+      {showStations && liveStations.map(s => {
+        const p = markerPos(s);
+        const c = aqiColour(s.aqi);
+        const isSelected = selected?.station_id === s.station_id;
+        const sz = isSelected ? 32 : 26;
+        return (
+          <button key={s.station_id} onClick={() => setSelected(s)}
+            className="absolute -translate-x-1/2 -translate-y-1/2 group"
+            style={{left:p.left, top:p.top}}>
+            <span className="block rounded-full flex items-center justify-center"
+              style={{width:sz, height:sz, background:`${c}33`, border:`1px solid ${c}88`, boxShadow:`0 0 14px ${c}66`}}>
+              <span className="text-[9px] font-black text-white leading-none">
+                {s.aqi != null ? Math.round(s.aqi) : "—"}
+              </span>
+            </span>
+            <span className="absolute left-1/2 -translate-x-1/2 top-full mt-1 whitespace-nowrap text-[9px] font-semibold text-white drop-shadow-lg">{s.name}</span>
+          </button>
+        );
+      })}
+
+      {/* Selected-station popup */}
+      {selected && (() => {
+        const c = aqiColour(selected.aqi);
+        return (
+          <div className="absolute left-3 top-3 rounded-xl p-3 w-52"
+            style={{background:"rgba(2,12,7,.96)", border:`1px solid ${c}55`, backdropFilter:"blur(12px)"}}>
+            <div className="flex items-center justify-between">
+              <p className="text-[9px] text-slate-500">Selected station</p>
+              <button onClick={() => setSelected(null)} className="text-slate-500"><X size={12}/></button>
+            </div>
+            <p className="text-sm font-bold text-white mt-1">{selected.name}</p>
+            <p className="text-2xl font-black mt-0.5" style={{color: c}}>
+              {selected.aqi != null ? Math.round(selected.aqi) : "—"}
+            </p>
+            <p className="text-[10px] text-slate-400">
+              AQI · {selected.aqi != null ? aqiLabel(selected.aqi) : "No data"}
+            </p>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <div>
+                <p className="text-[9px] text-slate-600">PM2.5</p>
+                <p className="text-[10px] text-white font-semibold">
+                  {selected.pm25 != null ? `${Math.round(selected.pm25)} µg/m³` : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[9px] text-slate-600">Agency</p>
+                <p className="text-[10px] text-white font-semibold">{selected.agency ?? "—"}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="absolute top-3 right-3 flex flex-col gap-1"><button onClick={()=>setZoom(z=>Math.min(12,z+1))} className="w-8 h-8 rounded-lg text-white flex items-center justify-center" style={{background:"rgba(2,12,7,.92)",border:"1px solid rgba(255,255,255,.12)"}}><ZoomIn size={14}/></button><button onClick={()=>setZoom(z=>Math.max(9,z-1))} className="w-8 h-8 rounded-lg text-white flex items-center justify-center" style={{background:"rgba(2,12,7,.92)",border:"1px solid rgba(255,255,255,.12)"}}><ZoomOut size={14}/></button><button onClick={()=>setZoom(10)} className="w-8 h-8 rounded-lg text-white flex items-center justify-center" style={{background:"rgba(2,12,7,.92)",border:"1px solid rgba(255,255,255,.12)"}}><Crosshair size={14}/></button></div>
       <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-1 p-1 rounded-lg" style={{background:"rgba(2,12,7,.92)",border:"1px solid rgba(255,255,255,.1)"}}><button onClick={()=>setLayer("dark")} className={`px-2.5 py-1 rounded-md text-[9px] ${layer==="dark"?"text-emerald-300 bg-emerald-500/10":"text-slate-500"}`}>Dark</button><button onClick={()=>setLayer("light")} className={`px-2.5 py-1 rounded-md text-[9px] ${layer==="light"?"text-emerald-300 bg-emerald-500/10":"text-slate-500"}`}>Light</button></div>
-      <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-2"><div className="rounded-lg px-3 py-2 text-[9px] text-slate-300" style={{background:"rgba(2,12,7,.9)"}}>NCR coverage · {liveStations.length} monitoring points</div>{[["#22c55e","Good"],["#eab308","Moderate"],["#f97316","Sensitive"],["#ef4444","Unhealthy"],["#a855f7","Very Unhealthy"]].map(([c,l])=><span key={l} className="flex items-center gap-1 px-2 py-1 rounded text-[9px] text-slate-300" style={{background:"rgba(2,12,7,.9)"}}><i className="w-2 h-2 rounded-full" style={{background:c}}/>{l}</span>)}</div>
+      <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-2">
+        <div className="rounded-lg px-3 py-2 text-[9px] text-slate-300" style={{background:"rgba(2,12,7,.9)"}}>
+          NCR coverage · {liveStations.length} monitoring points{live ? " · live" : ""}
+        </div>
+        {[["#22c55e","Good ≤50"],["#eab308","Moderate ≤100"],["#f97316","Unhealthy ≤200"],["#ef4444","Poor ≤300"],["#a855f7","Severe >300"]].map(([c,l])=>(
+          <span key={l} className="flex items-center gap-1 px-2 py-1 rounded text-[9px] text-slate-300" style={{background:"rgba(2,12,7,.9)"}}>
+            <i className="w-2 h-2 rounded-full flex-shrink-0" style={{background:c}}/>{l}
+          </span>
+        ))}
+      </div>
     </div>
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">{liveStations.slice(0,5).map(s=><button key={s.name} onClick={()=>setSelected(s)} className="rounded-xl p-2.5 text-left hover:bg-white/[.04]" style={{background:"rgba(255,255,255,.025)",border:"1px solid rgba(255,255,255,.05)"}}><p className="text-[10px] text-slate-400 truncate">{s.name}</p><p className="text-sm font-black" style={{color:dot[s.status]}}>
-  {s.aqi != null ? Math.round(s.aqi) : "—"}
-</p></button>)}</div>
+
+    {/* Bottom strip: show all stations, not just first 5 */}
+    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+      {liveStations.map(s => (
+        <button key={s.station_id} onClick={() => setSelected(s)}
+          className="rounded-xl p-2.5 text-left hover:bg-white/[.04] transition-colors"
+          style={{background: selected?.station_id===s.station_id ? "rgba(34,197,94,.08)" : "rgba(255,255,255,.025)", border:`1px solid ${selected?.station_id===s.station_id?"rgba(74,222,128,.2)":"rgba(255,255,255,.05)"}`}}>
+          <p className="text-[10px] text-slate-400 truncate">{s.name}</p>
+          <p className="text-sm font-black" style={{color: aqiColour(s.aqi)}}>
+            {s.aqi != null ? Math.round(s.aqi) : "—"}
+          </p>
+          <p className="text-[9px] text-slate-600">{s.pm25 != null ? `PM2.5 ${Math.round(s.pm25)}` : "no obs"}</p>
+        </button>
+      ))}
+    </div>
   </div>;
 }
 

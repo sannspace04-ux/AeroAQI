@@ -19,7 +19,7 @@ shap==0.52.0
 joblib==1.6.0
 # --- Data handling ---
 pandas==2.2.2
-numpy==1.26.4
+numpy==2.2.4
 pyarrow==16.1.0        # Parquet read/write via pandas
 
 # --- Configuration ---

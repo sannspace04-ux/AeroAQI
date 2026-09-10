@@ -507,7 +507,7 @@ function KpiStrip() {
 // ─── Weather & Atmosphere Panel ───────────────────────────
 // ─── Live Open-Meteo helpers ───────────────────────────────
 const DELHI_COORDS = { lat: 28.6139, lon: 77.2090 };
-const API_BASE = "";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 async function apiGet(path){ const r=await fetch(`${API_BASE}${path}`,{headers:{Accept:"application/json"}}); if(!r.ok) throw new Error(`API ${r.status}`); return r.json(); }
 async function apiPost(path,body){ const r=await fetch(`${API_BASE}${path}`,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify(body)}); if(!r.ok) throw new Error(`API ${r.status}`); return r.json(); }
 const WEATHER_URL = `https://api.open-meteo.com/v1/forecast?latitude=${DELHI_COORDS.lat}&longitude=${DELHI_COORDS.lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,pressure_msl,weather_code&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,pressure_msl,boundary_layer_height,temperature_1000hPa,temperature_925hPa,temperature_850hPa&daily=weather_code,temperature_2m_max,temperature_2m_min,relative_humidity_2m_mean,wind_speed_10m_max,wind_direction_10m_dominant,pressure_msl_mean,precipitation_probability_max&timezone=Asia%2FKolkata&forecast_days=7&models=ecmwf_ifs`;
@@ -598,8 +598,14 @@ function useLiveStations() {
         if (!alive) return;
         // Both API calls failed or stations was empty — show nothing rather
         // than silently mixing real and fake data.
-        setState({ stations: [], live: false, loading: false,
-          error: "Station data unavailable. Ensure the AeroAQI backend is running." });
+        setState(prev => ({
+  stations: prev.stations,
+  live: prev.stations.length > 0,
+  loading: false,
+  error: prev.stations.length > 0
+    ? "Live refresh unavailable — showing last synced data."
+    : "Station data unavailable. Ensure the AeroAQI backend is running."
+}));
       }
     };
 
@@ -1393,9 +1399,18 @@ function ForecastPage() {
         });
       })
       .catch(err => {
-        if (!alive) return;
-        setForecastState({ loading: false, hourly: [], modelTrained: false, error: `Forecast unavailable: ${err.message}`, generatedAt: null });
-      });
+  if (!alive) return;
+
+  setForecastState(prev => ({
+    loading: false,
+    hourly: prev.hourly?.length ? prev.hourly : [],
+    modelTrained: prev.hourly?.length ? prev.modelTrained : false,
+    error: prev.hourly?.length
+      ? "Live refresh unavailable — showing last synced forecast."
+      : `Forecast unavailable: ${err.message}`,
+    generatedAt: prev.hourly?.length ? prev.generatedAt : null,
+  }));
+});
 
     return () => { alive = false; };
   }, [selectedId]);
